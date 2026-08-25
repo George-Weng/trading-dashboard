@@ -51,7 +51,7 @@ export async function onRequest(context) {
                 errors.push(`品种 "${symbol || '未命名'}" 数据不完整`);
                 continue;
             }
-            // 使用 INSERT OR REPLACE 避免重复
+            // 使用 INSERT OR REPLACE
             const result = await db.prepare(
                 `INSERT OR REPLACE INTO symbols 
                 (symbol, point_value, tick_size, open_fee_rate, close_fee_rate)
@@ -84,11 +84,17 @@ export async function onRequest(context) {
         }
     }
 
-    // ===== DELETE 单条 =====
+    // ===== DELETE 单条（路径参数） =====
     if (request.method === 'DELETE') {
-        const symbol = url.searchParams.get('symbol');
+        // 支持两种格式：/api/symbols?symbol=xxx 或 /api/symbols/xxx
+        let symbol = url.searchParams.get('symbol');
+        if (!symbol) {
+            // 尝试从路径中获取
+            const parts = pathname.split('/');
+            symbol = parts[parts.length - 1];
+        }
         if (!symbol) return new Response(JSON.stringify({ error: '缺少品种名' }), { status: 400 });
-        // 检查是否有交易引用该品种
+        // 检查是否有交易引用
         const ref = await db.prepare('SELECT id FROM trades WHERE symbol = ? LIMIT 1').bind(symbol).first();
         if (ref) {
             return new Response(JSON.stringify({ error: '该品种已被交易记录引用，无法删除' }), { status: 400 });

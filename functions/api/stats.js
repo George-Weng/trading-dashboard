@@ -43,7 +43,8 @@ export async function onRequest(context) {
             FROM trades
             WHERE close_price IS NOT NULL ${userCondition}
         `;
-        const kpi = await db.prepare(kpiQuery).bind(...params).first();
+        const { results: kpiResults } = await db.prepare(kpiQuery).bind(...params).all();
+        const kpi = kpiResults?.[0] || {};
 
         // ----- 2. 总资本 -----
         let capitalQuery = 'SELECT SUM(initial_capital) as totalCapital FROM users WHERE role = ?';
@@ -55,8 +56,9 @@ export async function onRequest(context) {
             capitalQuery += ' AND username = ?';
             capitalParams.push(targetUser);
         }
-        const capitalResult = await db.prepare(capitalQuery).bind(...capitalParams).first();
-        const totalCapital = capitalResult?.totalCapital || 0;
+        const { results: capitalResults } = await db.prepare(capitalQuery).bind(...capitalParams).all();
+        const capitalResult = capitalResults?.[0] || {};
+        const totalCapital = capitalResult.totalCapital || 0;
 
         // ----- 3. 月度盈亏 -----
         const monthQuery = `
@@ -66,9 +68,9 @@ export async function onRequest(context) {
             GROUP BY substr(date, 6, 2)
             ORDER BY month
         `;
-        const monthResults = await db.prepare(monthQuery).bind(...params).all() || [];
+        const { results: monthResults } = await db.prepare(monthQuery).bind(...params).all();
         const monthMap = {};
-        monthResults.forEach(m => { monthMap[m.month] = m.profit; });
+        (monthResults || []).forEach(m => { monthMap[m.month] = m.profit; });
         const monthlyProfit = [];
         for (let i = 1; i <= 12; i++) {
             const key = String(i).padStart(2, '0');
@@ -84,7 +86,7 @@ export async function onRequest(context) {
             GROUP BY date
             ORDER BY date
         `;
-        const dailyResults = await db.prepare(dailyQuery).bind(...params).all() || [];
+        const { results: dailyResults } = await db.prepare(dailyQuery).bind(...params).all();
 
         // ----- 5. 周净值（按自然周分组，使用 JS 处理，标签显示为 W01, W02...） -----
         const allTradesQuery = `
@@ -93,10 +95,10 @@ export async function onRequest(context) {
             WHERE close_price IS NOT NULL ${userCondition}
             ORDER BY date
         `;
-        const allTrades = await db.prepare(allTradesQuery).bind(...params).all() || [];
+        const { results: allTrades } = await db.prepare(allTradesQuery).bind(...params).all();
 
         const weekMap = new Map();
-        if (allTrades.length > 0) {
+        if (allTrades && allTrades.length > 0) {
             // 找出第一个日期
             const firstDate = new Date(allTrades[0].date);
             // 计算该日期所在周的周一（ISO 周一）
@@ -152,12 +154,12 @@ export async function onRequest(context) {
         // ----- 6. 组装返回 -----
         const response = {
             kpi: {
-                totalTrades: kpi?.totalTrades || 0,
-                winTrades: kpi?.winTrades || 0,
-                totalProfit: kpi?.totalProfit || 0,
-                totalFee: kpi?.totalFee || 0,
-                totalWin: kpi?.totalWin || 0,
-                totalLoss: kpi?.totalLoss || 0,
+                totalTrades: kpi.totalTrades || 0,
+                winTrades: kpi.winTrades || 0,
+                totalProfit: kpi.totalProfit || 0,
+                totalFee: kpi.totalFee || 0,
+                totalWin: kpi.totalWin || 0,
+                totalLoss: kpi.totalLoss || 0,
                 totalCapital: totalCapital,
             },
             monthly: {
@@ -165,8 +167,8 @@ export async function onRequest(context) {
                 data: monthlyProfit,
             },
             daily: {
-                labels: dailyResults.map(d => d.date),
-                data: dailyResults.map(d => d.profit || 0),
+                labels: (dailyResults || []).map(d => d.date),
+                data: (dailyResults || []).map(d => d.profit || 0),
             },
             weekly: {
                 labels: weekLabels,

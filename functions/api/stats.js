@@ -58,7 +58,7 @@ export async function onRequest(context) {
         const capitalResult = await db.prepare(capitalQuery).bind(...capitalParams).first();
         const totalCapital = capitalResult?.totalCapital || 0;
 
-        // ----- 3. 月度盈亏 -----
+        // ----- 3. 月度盈亏（使用解构） -----
         const monthQuery = `
             SELECT substr(date, 6, 2) as month, SUM(profit) as profit
             FROM trades
@@ -66,7 +66,7 @@ export async function onRequest(context) {
             GROUP BY substr(date, 6, 2)
             ORDER BY month
         `;
-        const monthResults = await db.prepare(monthQuery).bind(...params).all();
+        const { results: monthResults } = await db.prepare(monthQuery).bind(...params).all();
         const monthMap = {};
         monthResults.forEach(m => { monthMap[m.month] = m.profit; });
         const monthlyProfit = [];
@@ -84,46 +84,38 @@ export async function onRequest(context) {
             GROUP BY date
             ORDER BY date
         `;
-        const dailyResults = await db.prepare(dailyQuery).bind(...params).all();
+        const { results: dailyResults } = await db.prepare(dailyQuery).bind(...params).all();
 
-        // ----- 5. 周净值（在 JavaScript 中分组，更可靠） -----
-        // 获取所有已平仓交易的日期和盈亏
+        // ----- 5. 周净值（获取所有已平仓交易） -----
         const allTradesQuery = `
             SELECT date, profit
             FROM trades
             WHERE close_price IS NOT NULL ${userCondition}
             ORDER BY date
         `;
-        const allTrades = await db.prepare(allTradesQuery).bind(...params).all();
+        const { results: allTrades } = await db.prepare(allTradesQuery).bind(...params).all();
 
-        // 按周分组（从第一个交易日期开始，每周7天）
+        // 按周分组（在 JS 中处理）
         const weekMap = new Map();
         if (allTrades.length > 0) {
-            // 找出第一个日期
             const firstDate = new Date(allTrades[0].date);
-            // 计算该日期所在周的周一（ISO 周一）
             const dayOfWeek = firstDate.getDay(); // 0=周日
-            const diff = (dayOfWeek === 0 ? 6 : dayOfWeek - 1); // 到周一的天数
+            const diff = (dayOfWeek === 0 ? 6 : dayOfWeek - 1);
             const startOfWeek = new Date(firstDate);
             startOfWeek.setDate(firstDate.getDate() - diff);
-            // 按周累计
             let currentWeekStart = new Date(startOfWeek);
             let weekProfit = 0;
             for (const trade of allTrades) {
                 const tradeDate = new Date(trade.date);
-                // 如果交易日期在当周内（7天内），累加
                 const weekDiff = (tradeDate - currentWeekStart) / (7 * 24 * 60 * 60 * 1000);
                 if (weekDiff < 1) {
                     weekProfit += trade.profit || 0;
                 } else {
-                    // 保存上周
                     const weekKey = currentWeekStart.toISOString().slice(0, 10);
                     weekMap.set(weekKey, weekProfit);
-                    // 移动到新的一周
                     currentWeekStart = new Date(currentWeekStart);
                     currentWeekStart.setDate(currentWeekStart.getDate() + 7);
                     weekProfit = trade.profit || 0;
-                    // 如果还有后续，继续循环
                 }
             }
             // 保存最后一周
@@ -135,17 +127,13 @@ export async function onRequest(context) {
         const weekLabels = ['初始'];
         const weeklyEquity = [1.0];
         let cumProfit = 0;
-        // 按日期排序周
         const sortedWeeks = Array.from(weekMap.keys()).sort();
         for (const weekStart of sortedWeeks) {
             cumProfit += weekMap.get(weekStart) || 0;
             const equity = totalCapital > 0 ? (totalCapital + cumProfit) / totalCapital : 1;
             weeklyEquity.push(parseFloat(equity.toFixed(4)));
-            // 标签显示该周的起始日期
             weekLabels.push(weekStart.slice(5));
         }
-
-        // 如果没有任何周数据，保留默认两点
         if (weeklyEquity.length === 1) {
             weeklyEquity.push(1.0);
             weekLabels.push('当前');

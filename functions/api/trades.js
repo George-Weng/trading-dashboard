@@ -28,9 +28,7 @@ export async function onRequest(context) {
         }
         query += ' ORDER BY date DESC, id DESC';
         const { results } = await db.prepare(query).bind(...params).all();
-        return new Response(JSON.stringify(results), {
-            headers: { 'Content-Type': 'application/json' }
-        });
+        return new Response(JSON.stringify(results), { headers: { 'Content-Type': 'application/json' } });
     }
 
     // ===== POST 单条 =====

@@ -4,6 +4,7 @@ export async function onRequest(context) {
     const { request, env } = context;
     const db = env.DB;
 
+    // 验证 JWT
     const authHeader = request.headers.get('Authorization');
     const token = authHeader && authHeader.split(' ')[1];
     if (!token) return new Response(JSON.stringify({ error: '未授权' }), { status: 401 });
@@ -100,6 +101,7 @@ export async function onRequest(context) {
         if (!id || isNaN(id)) {
             return new Response(JSON.stringify({ error: '无效的 ID' }), { status: 400 });
         }
+        // 权限检查
         const check = await db.prepare('SELECT username FROM trades WHERE id = ?').bind(id).first();
         if (!check) return new Response(JSON.stringify({ error: '记录不存在' }), { status: 404 });
         if (role === 'trader' && check.username !== username) {
@@ -133,6 +135,7 @@ export async function onRequest(context) {
     // ===== DELETE =====
     if (request.method === 'DELETE') {
         const id = pathname.split('/').pop();
+        // 如果路径包含数字ID，删除单条
         if (id && !isNaN(id)) {
             const check = await db.prepare('SELECT username FROM trades WHERE id = ?').bind(id).first();
             if (!check) return new Response(JSON.stringify({ error: '记录不存在' }), { status: 404 });
@@ -146,7 +149,7 @@ export async function onRequest(context) {
                 return new Response(JSON.stringify({ error: '删除失败' }), { status: 500 });
             }
         } else {
-            // 清空
+            // 清空（仅管理员）
             if (role !== 'admin') return new Response(JSON.stringify({ error: '权限不足' }), { status: 403 });
             const targetUser = url.searchParams.get('user');
             let query = 'DELETE FROM trades';

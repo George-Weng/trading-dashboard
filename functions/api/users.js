@@ -41,12 +41,13 @@ export async function onRequest(context) {
         }
     }
 
-    // ===== PUT 修改用户信息（修改密码或资金） =====
+    // ===== PUT 修改密码或资金 =====
     if (request.method === 'PUT') {
-        // 路径格式 /api/users/{username}/password 或 /api/users/capital
+        // 判断路径格式
         if (pathname.endsWith('/password')) {
+            // 格式 /api/users/{username}/password
             const parts = pathname.split('/');
-            const username = parts[parts.length - 2]; // 例如 /api/users/George/password
+            const username = parts[parts.length - 2];
             const { password } = await request.json();
             if (!password) return new Response(JSON.stringify({ error: '密码不能为空' }), { status: 400 });
             const result = await db.prepare('UPDATE users SET password = ? WHERE username = ?').bind(password, username).run();
@@ -71,14 +72,16 @@ export async function onRequest(context) {
         }
     }
 
-    // ===== DELETE 删除用户 =====
+    // ===== DELETE 删除用户（路径参数） =====
     if (request.method === 'DELETE') {
-        const username = url.searchParams.get('username');
+        // 支持 /api/users/{username}
+        const parts = pathname.split('/');
+        const username = parts[parts.length - 1];
         if (!username) return new Response(JSON.stringify({ error: '缺少用户名' }), { status: 400 });
         if (username === 'admin') {
             return new Response(JSON.stringify({ error: '不能删除管理员' }), { status: 400 });
         }
-        // 先删除该用户的交易记录
+        // 先删除交易
         await db.prepare('DELETE FROM trades WHERE username = ?').bind(username).run();
         const result = await db.prepare('DELETE FROM users WHERE username = ?').bind(username).run();
         if (result.success) {

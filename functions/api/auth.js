@@ -1,9 +1,3 @@
-// 临时调试：返回环境变量是否设置
-return new Response(JSON.stringify({ secret: env.JWT_SECRET ? 'exists' : 'missing' }), {
-    headers: { 'Content-Type': 'application/json' }
-});
-
-
 
 import jwt from '@tsndr/cloudflare-worker-jwt';
 

@@ -4,15 +4,92 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>交易数据分析看板 - 云端版</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
-        /* 样式省略，请使用之前的完整样式，或从原文件中复制 */
-        /* 这里假设您已有样式，为了缩短篇幅，不再重复 */
+        * { margin:0; padding:0; box-sizing:border-box; }
+        :root {
+            --bg-dark: #0b0e14; --bg-card: #131a22; --bg-input: #1c2632;
+            --border-color: #2a3a4a; --text-primary: #e8edf2; --text-secondary: #8a9aa8;
+            --gold: #d4a843; --gold-dim: #a5832e; --green-profit: #4ecdc4; --red-loss: #ff6b6b;
+            --shadow: 0 8px 32px rgba(0,0,0,0.6); --radius: 10px; --transition: 0.25s ease;
+        }
+        html, body { height:100%; font-family:'Segoe UI','PingFang SC',Roboto,sans-serif; background:var(--bg-dark); color:var(--text-primary); }
+        button { cursor:pointer; font-family:inherit; border:none; outline:none; }
+        input, select { font-family:inherit; outline:none; border:none; background:var(--bg-input); color:var(--text-primary); padding:8px 12px; border-radius:6px; border:1px solid var(--border-color); transition:var(--transition); }
+        input:focus, select:focus { border-color:var(--gold); box-shadow:0 0 0 2px rgba(212,168,67,0.25); }
+        table { width:100%; border-collapse:collapse; font-size:14px; }
+        th { background:var(--bg-input); color:var(--gold); font-weight:600; padding:10px 8px; text-align:left; border-bottom:2px solid var(--gold-dim); white-space:nowrap; }
+        td { padding:8px 8px; border-bottom:1px solid var(--border-color); white-space:nowrap; }
+        tr:hover td { background:rgba(212,168,67,0.04); }
+        .scroll-wrap { overflow-x:auto; padding-bottom:4px; }
+        ::-webkit-scrollbar { width:6px; height:6px; }
+        ::-webkit-scrollbar-track { background:var(--bg-dark); }
+        ::-webkit-scrollbar-thumb { background:var(--gold-dim); border-radius:6px; }
+        ::-webkit-scrollbar-thumb:hover { background:var(--gold); }
+        #loginPage { display:flex; justify-content:center; align-items:center; height:100vh; background:radial-gradient(ellipse at 30% 40%, #16212b, #080b10); }
+        .login-box { background:var(--bg-card); padding:48px 40px 40px; border-radius:var(--radius); box-shadow:var(--shadow); width:400px; border:1px solid var(--border-color); position:relative; }
+        .login-box h1 { font-size:28px; font-weight:300; text-align:center; margin-bottom:6px; letter-spacing:2px; }
+        .login-box h1 span { color:var(--gold); font-weight:600; }
+        .login-box .sub { text-align:center; color:var(--text-secondary); font-size:14px; margin-bottom:28px; border-bottom:1px solid var(--border-color); padding-bottom:18px; }
+        .login-box label { display:block; font-size:13px; color:var(--text-secondary); margin-bottom:4px; margin-top:14px; }
+        .login-box input { width:100%; padding:10px 14px; font-size:15px; }
+        .login-box .btn-login { width:100%; padding:12px; margin-top:26px; background:var(--gold); color:#0b0e14; font-size:17px; font-weight:700; border-radius:6px; transition:var(--transition); letter-spacing:1px; }
+        .login-box .btn-login:hover { background:#e8c85a; transform:translateY(-1px); box-shadow:0 4px 20px rgba(212,168,67,0.3); }
+        .login-box .error { color:var(--red-loss); font-size:14px; text-align:center; margin-top:12px; min-height:22px; }
+        #app { display:none; height:100vh; flex-direction:column; background:var(--bg-dark); }
+        .header { background:var(--bg-card); padding:12px 28px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); flex-shrink:0; flex-wrap:wrap; gap:8px 16px; }
+        .header .user-info { display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+        .header .user-info .name { font-size:18px; font-weight:600; }
+        .header .user-info .role-badge { background:var(--gold-dim); color:#fff; font-size:12px; padding:2px 14px; border-radius:20px; font-weight:600; letter-spacing:0.5px; }
+        .header .slogan { color:var(--gold); font-size:18px; font-weight:500; letter-spacing:1px; text-shadow:0 0 12px rgba(212,168,67,0.15); flex:1; text-align:center; min-width:180px; }
+        .header .actions { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+        .header .actions select { background:var(--bg-input); color:var(--text-primary); border:1px solid var(--border-color); padding:4px 8px; border-radius:4px; font-size:13px; }
+        .header .actions button { background:transparent; color:var(--text-secondary); padding:6px 16px; border-radius:6px; border:1px solid var(--border-color); font-size:13px; transition:var(--transition); }
+        .header .actions button:hover { border-color:var(--gold); color:var(--gold); background:rgba(212,168,67,0.08); }
+        .header .actions .logout-btn { border-color:#5a2a2a; color:var(--red-loss); }
+        .header .actions .logout-btn:hover { border-color:var(--red-loss); background:rgba(255,107,107,0.08); }
+        .main-body { display:flex; flex:1; overflow:hidden; }
+        .sidebar { width:10%; min-width:80px; background:var(--bg-card); border-right:1px solid var(--border-color); padding:16px 0; flex-shrink:0; overflow-y:auto; }
+        .sidebar .menu-item { padding:12px 10px; font-size:14px; color:var(--text-secondary); cursor:pointer; transition:var(--transition); border-left:3px solid transparent; display:flex; flex-direction:column; align-items:center; gap:4px; text-align:center; }
+        .sidebar .menu-item .icon { font-size:20px; }
+        .sidebar .menu-item .label { font-size:11px; line-height:1.2; }
+        .sidebar .menu-item:hover { background:rgba(212,168,67,0.06); color:var(--text-primary); }
+        .sidebar .menu-item.active { color:var(--gold); border-left-color:var(--gold); background:rgba(212,168,67,0.08); }
+        .content { flex:1; padding:20px 28px; overflow-y:auto; background:var(--bg-dark); }
+        .content .page-title { font-size:22px; font-weight:300; margin-bottom:18px; color:var(--text-primary); border-bottom:1px solid var(--border-color); padding-bottom:10px; }
+        .content .page-title small { color:var(--text-secondary); font-size:14px; font-weight:400; margin-left:12px; }
+        .toolbar { display:flex; flex-wrap:wrap; gap:10px 16px; margin-bottom:16px; align-items:center; }
+        .toolbar .btn { padding:7px 18px; border-radius:6px; font-size:13px; font-weight:600; transition:var(--transition); background:var(--bg-input); color:var(--text-primary); border:1px solid var(--border-color); }
+        .toolbar .btn:hover { border-color:var(--gold); color:var(--gold); }
+        .toolbar .btn-primary { background:var(--gold); color:#0b0e14; border-color:var(--gold); }
+        .toolbar .btn-primary:hover { background:#e8c85a; border-color:#e8c85a; color:#0b0e14; }
+        .toolbar .btn-success { border-color:#2a6a5a; color:var(--green-profit); }
+        .toolbar .btn-success:hover { background:rgba(78,205,196,0.08); border-color:var(--green-profit); }
+        .toolbar .btn-danger { border-color:#5a2a2a; color:var(--red-loss); }
+        .toolbar .btn-danger:hover { background:rgba(255,107,107,0.1); border-color:var(--red-loss); }
+        .empty-msg { color:var(--text-secondary); text-align:center; padding:40px 0; font-size:15px; }
+        .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); backdrop-filter:blur(4px); z-index:999; justify-content:center; align-items:center; }
+        .modal-overlay.open { display:flex; }
+        .modal-box { background:var(--bg-card); border-radius:var(--radius); box-shadow:var(--shadow); padding:32px 36px; max-width:640px; width:92%; max-height:90vh; overflow-y:auto; border:1px solid var(--border-color); }
+        .modal-box h3 { font-size:20px; font-weight:400; margin-bottom:18px; color:var(--gold); }
+        .modal-box label { display:block; font-size:13px; color:var(--text-secondary); margin-top:12px; margin-bottom:4px; }
+        .modal-box input, .modal-box select { width:100%; padding:8px 12px; }
+        .modal-box .btn-row { display:flex; gap:12px; margin-top:22px; justify-content:flex-end; }
+        .modal-box .btn-row .btn { padding:8px 28px; border-radius:6px; font-weight:600; font-size:14px; }
+        .modal-box .btn-row .btn-cancel { background:transparent; color:var(--text-secondary); border:1px solid var(--border-color); }
+        .modal-box .btn-row .btn-cancel:hover { border-color:var(--text-secondary); }
+        .modal-box .btn-row .btn-confirm { background:var(--gold); color:#0b0e14; }
+        .modal-box .btn-row .btn-confirm:hover { background:#e8c85a; }
+        .modal-box .form-hint { color:var(--text-secondary); font-size:12px; margin-top:4px; }
+        .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 24px; }
+        .kpi-card { background: var(--bg-card); padding: 14px 12px; border-radius: var(--radius); border: 1px solid var(--border-color); text-align: center; }
+        .kpi-card .label { color: var(--text-secondary); font-size: 13px; }
+        .kpi-card .value { font-size: clamp(18px, 2.2vw, 24px); font-weight: 600; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .loading { text-align:center; padding:40px 0; color:var(--text-secondary); }
     </style>
 </head>
 <body>
-    <!-- 登录页 -->
+    <!-- ===== 登录页 ===== -->
     <div id="loginPage">
         <div class="login-box">
             <h1>📊 <span>交易看板</span></h1>
@@ -26,23 +103,55 @@
         </div>
     </div>
 
-    <!-- 主应用 -->
+    <!-- ===== 主应用 ===== -->
     <div id="app">
-        <header class="header">...</header>
+        <header class="header">
+            <div class="user-info">
+                <span class="name" id="headerName">—</span>
+                <span class="role-badge" id="headerRole">—</span>
+            </div>
+            <div class="slogan">⚡ 该进进、该出出、不做判断、只做跟随！</div>
+            <div class="actions">
+                <span id="userSwitchContainer" style="display:none;">
+                    <label style="color:var(--text-secondary);font-size:13px;">查看用户：</label>
+                    <select id="userSwitchSelect" onchange="switchViewUser(this.value)"></select>
+                </span>
+                <button onclick="openChangePwd()">🔑 修改密码</button>
+                <button class="logout-btn" onclick="doLogout()">退出</button>
+            </div>
+        </header>
         <div class="main-body">
-            <nav class="sidebar">...</nav>
-            <div class="content" id="contentArea"></div>
+            <nav class="sidebar" id="sidebar">
+                <div class="menu-item active" data-page="home" onclick="switchPage('home')">
+                    <span class="icon">🏠</span><span class="label">主页</span>
+                </div>
+                <div class="menu-item" data-page="trades" onclick="switchPage('trades')">
+                    <span class="icon">📈</span><span class="label">交易记录</span>
+                </div>
+                <div class="menu-item" data-page="data" onclick="switchPage('data')">
+                    <span class="icon">⚙️</span><span class="label">数据维护</span>
+                </div>
+                <div class="menu-item" data-page="users" onclick="switchPage('users')">
+                    <span class="icon">👥</span><span class="label">用户管理</span>
+                </div>
+            </nav>
+            <div class="content" id="contentArea">
+                <div class="loading">加载中...</div>
+            </div>
         </div>
     </div>
 
-    <!-- 模态框 -->
-    <div class="modal-overlay" id="modalOverlay"><div class="modal-box" id="modalBox"></div></div>
+    <!-- ===== 模态框 ===== -->
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal-box" id="modalBox"></div>
+    </div>
 
     <script>
         // ======================================================================
-        //  API 客户端
+        //  全局 API 客户端
         // ======================================================================
         const API_BASE = '/api';
+
         async function apiRequest(endpoint, options = {}) {
             const token = localStorage.getItem('token');
             const headers = {
@@ -50,16 +159,19 @@
                 ...(token && { 'Authorization': `Bearer ${token}` }),
                 ...options.headers
             };
-            const response = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
+            const response = await fetch(`${API_BASE}${endpoint}`, {
+                ...options,
+                headers
+            });
             if (!response.ok) {
-                const err = await response.json().catch(() => ({}));
-                throw new Error(err.error || '请求失败');
+                const error = await response.json().catch(() => ({}));
+                throw new Error(error.error || '请求失败');
             }
             return response.json();
         }
 
         // ======================================================================
-        //  工具函数（保留）
+        //  工具函数
         // ======================================================================
         function formatCurrency(n) {
             if (n === undefined || n === null || isNaN(n)) return '—';
@@ -74,7 +186,7 @@
         let currentUser = null;
         let viewingUser = 'all';
         let currentPage = 'home';
-        let _editingUsername = null;
+        let _editingUsername = null; // 用于新增/编辑交易时归属用户
 
         // ======================================================================
         //  登录 / 登出
@@ -85,7 +197,10 @@
                 const username = document.getElementById('loginUser').value.trim();
                 const password = document.getElementById('loginPass').value.trim();
                 if (!username || !password) { errEl.textContent = '请输入用户名和密码'; return; }
-                const data = await apiRequest('/auth', { method: 'POST', body: JSON.stringify({ username, password }) });
+                const data = await apiRequest('/auth', {
+                    method: 'POST',
+                    body: JSON.stringify({ username, password })
+                });
                 localStorage.setItem('token', data.token);
                 localStorage.setItem('username', data.username);
                 localStorage.setItem('role', data.role);
@@ -97,6 +212,7 @@
                 initApp();
             } catch (e) {
                 errEl.textContent = e.message || '登录失败';
+                console.error(e);
             }
         }
 
@@ -115,7 +231,8 @@
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Enter') {
                 const loginPage = document.getElementById('loginPage');
-                if (loginPage.style.display !== 'none') { e.preventDefault(); doLogin(); }
+                if (loginPage.style.display !== 'none') { e.preventDefault();
+                    doLogin(); }
             }
         });
 
@@ -124,15 +241,20 @@
         // ======================================================================
         async function initApp() {
             if (!currentUser) { doLogout(); return; }
-            document.getElementById('headerName').textContent = currentUser.username;
-            document.getElementById('headerRole').textContent = currentUser.role === 'admin' ? '管理员' : '交易员';
+            // 安全设置 header
+            const nameEl = document.getElementById('headerName');
+            const roleEl = document.getElementById('headerRole');
+            if (nameEl) nameEl.textContent = currentUser.username;
+            if (roleEl) roleEl.textContent = currentUser.role === 'admin' ? '管理员' : '交易员';
+
             const container = document.getElementById('userSwitchContainer');
             if (currentUser.role === 'admin') {
-                container.style.display = 'inline-block';
+                if (container) container.style.display = 'inline-block';
                 await populateUserSwitch();
             } else {
-                container.style.display = 'none';
+                if (container) container.style.display = 'none';
             }
+
             const isAdmin = currentUser.role === 'admin';
             document.querySelectorAll('.sidebar .menu-item').forEach(item => {
                 const page = item.dataset.page;
@@ -146,6 +268,7 @@
             try {
                 const users = await apiRequest('/users');
                 const sel = document.getElementById('userSwitchSelect');
+                if (!sel) return;
                 sel.innerHTML = '';
                 const allOpt = document.createElement('option');
                 allOpt.value = 'all';
@@ -161,7 +284,9 @@
                         sel.appendChild(opt);
                     }
                 });
-            } catch (e) { console.warn('获取用户列表失败', e); }
+            } catch (e) {
+                console.warn('获取用户列表失败', e);
+            }
         }
 
         function switchViewUser(username) {
@@ -187,11 +312,20 @@
             area.innerHTML = '<div class="loading">加载中...</div>';
             try {
                 switch (page) {
-                    case 'home': renderHome(area); break;
-                    case 'trades': renderTrades(area); break;
-                    case 'data': renderData(area); break;
-                    case 'users': renderUsers(area); break;
-                    default: area.innerHTML = '<div class="empty-msg">页面不存在</div>';
+                    case 'home':
+                        renderHome(area);
+                        break;
+                    case 'trades':
+                        renderTrades(area);
+                        break;
+                    case 'data':
+                        renderData(area);
+                        break;
+                    case 'users':
+                        renderUsers(area);
+                        break;
+                    default:
+                        area.innerHTML = '<div class="empty-msg">页面不存在</div>';
                 }
             } catch (e) {
                 area.innerHTML = `<div class="empty-msg">渲染错误：${e.message}</div>`;
@@ -200,12 +334,46 @@
         }
 
         // ======================================================================
-        //  主页 (略，参考之前版本)
+        //  主页（简化版，无图表）
         // ======================================================================
-        async function renderHome(area) { /* 同前，省略 */ }
+        async function renderHome(area) {
+            try {
+                let url = '/stats';
+                if (viewingUser !== 'all') url += `?user=${viewingUser}`;
+                const stats = await apiRequest(url);
+                const totalProfit = stats.totalProfit || 0;
+                const totalFee = stats.totalFee || 0;
+                const totalTrades = stats.totalTrades || 0;
+                const winTrades = stats.winTrades || 0;
+                const winRate = totalTrades > 0 ? (winTrades / totalTrades) * 100 : 0;
+                const totalCapital = stats.totalCapital || 0;
+                const equity = totalCapital + totalProfit;
+                const profitRate = totalCapital > 0 ? (totalProfit / totalCapital) * 100 : 0;
+                const profitFactor = (totalTrades > 0 && stats.totalLoss > 0) ? (stats.totalWin / stats.totalLoss).toFixed(2) : (stats.totalWin > 0 ? '∞' : '0');
+
+                const label = viewingUser === 'all' ? '全部交易员' : viewingUser;
+                area.innerHTML = `
+                    <div class="page-title">📊 数据总览 <small>${label}</small></div>
+                    <div class="kpi-grid">
+                        <div class="kpi-card"><div class="label">当前权益</div><div class="value" style="color:${equity>=totalCapital?'var(--green-profit)':'var(--red-loss)'};">${formatCurrency(equity)}</div></div>
+                        <div class="kpi-card"><div class="label">总盈亏金额</div><div class="value" style="color:${totalProfit>=0?'var(--green-profit)':'var(--red-loss)'};">${totalProfit>=0?'+':''}${formatCurrency(totalProfit)}</div></div>
+                        <div class="kpi-card"><div class="label">盈亏比例</div><div class="value" style="color:${profitRate>=0?'var(--green-profit)':'var(--red-loss)'};">${profitRate>=0?'+':''}${profitRate.toFixed(2)}%</div></div>
+                        <div class="kpi-card"><div class="label">交易胜率</div><div class="value">${winRate.toFixed(1)}%</div></div>
+                        <div class="kpi-card"><div class="label">交易盈亏比</div><div class="value">${profitFactor}</div></div>
+                        <div class="kpi-card"><div class="label">总手续费</div><div class="value">${formatCurrency(totalFee)}</div></div>
+                        <div class="kpi-card"><div class="label">手续费占比</div><div class="value">-</div></div>
+                    </div>
+                    <div style="margin-top:16px;color:var(--text-secondary);font-size:13px;text-align:center;border-top:1px solid var(--border-color);padding-top:14px;">
+                        知行合一 · ${new Date().toLocaleDateString()}
+                    </div>
+                `;
+            } catch (e) {
+                area.innerHTML = `<div class="empty-msg">加载数据失败：${e.message}</div>`;
+            }
+        }
 
         // ======================================================================
-        //  交易记录 (含批量导入和清空)
+        //  交易记录（含批量导入、清空）
         // ======================================================================
         async function renderTrades(area) {
             try {
@@ -227,7 +395,7 @@
                 if (trades.length === 0) {
                     html += `<div class="empty-msg">暂无交易记录</div>`;
                 } else {
-                    const sorted = trades.sort((a,b) => (a.date < b.date ? 1 : -1));
+                    const sorted = trades.sort((a, b) => (a.date < b.date ? 1 : -1));
                     html += `<div class="scroll-wrap"><table><thead><tr>`;
                     if (viewingUser === 'all') html += `<th>交易员</th>`;
                     html += `<th>日期</th><th>品种</th><th>方向</th><th>止损</th><th>开仓价</th><th>手数</th><th>平仓价</th><th>盈亏</th><th>操作</th></tr></thead><tbody>`;
@@ -252,7 +420,7 @@
             }
         }
 
-        // ---- 新增交易（单条） ----
+        // ---- 单条交易 CRUD ----
         function openAddTrade() {
             if (currentUser.role === 'admin' && viewingUser === 'all') {
                 openSelectTraderModal(username => { if (username) openTradeModal(null, username); });
@@ -261,6 +429,12 @@
             const username = (currentUser.role === 'admin') ? viewingUser : currentUser.username;
             if (!username) { alert('无法确定归属用户'); return; }
             openTradeModal(null, username);
+        }
+
+        function editTrade(id) {
+            // 为了简便，我们直接打开编辑模态框，保存时由后端根据权限决定
+            // 但我们需要知道归属用户，可从列表中获取，这里暂不实现，建议用户先删除再添加
+            alert('编辑功能暂未实现，可删除后重新添加');
         }
 
         function openTradeModal(tradeId, username) {
@@ -325,7 +499,7 @@
             }
         }
 
-        // ---- 批量导入交易 ----
+        // ---- 批量导入 ----
         function openImportTrades() {
             if (currentUser.role === 'admin' && viewingUser === 'all') {
                 openSelectTraderModal(username => {
@@ -392,7 +566,7 @@
             reader.readAsArrayBuffer(file);
         }
 
-        // ---- 清空交易 ----
+        // ---- 清空 ----
         async function clearUserTrades(username) {
             if (!confirm(`确认清空用户「${username}」的所有交易记录？`)) return;
             try {
@@ -494,6 +668,71 @@
             }
         }
 
+        // ---- 资金保存 ----
+        async function saveUserCapital(username) {
+            const inp = document.getElementById('cap_' + username);
+            if (!inp) return;
+            const val = parseFloat(inp.value);
+            if (isNaN(val) || val < 0) { alert('请输入有效金额'); return; }
+            try {
+                await apiRequest('/users/capital', { method: 'PUT', body: JSON.stringify({ username, initial_capital: val }) });
+                alert('保存成功');
+                renderPage(currentPage);
+            } catch (e) {
+                alert('保存失败：' + e.message);
+            }
+        }
+
+        // ---- 品种单条添加 ----
+        function openAddSymbol() {
+            const modal = document.getElementById('modalOverlay');
+            const box = document.getElementById('modalBox');
+            box.innerHTML = `
+                <h3>添加品种</h3>
+                <label>交易品种</label><input id="mSymSymbol">
+                <label>点值</label><input id="mSymPoint" type="number" step="any">
+                <label>最小跳动点数</label><input id="mSymTick" type="number" step="any">
+                <label>开仓手续费率</label><input id="mSymOpenRate" type="number" step="any">
+                <label>平仓手续费率</label><input id="mSymCloseRate" type="number" step="any">
+                <div class="btn-row">
+                    <button class="btn btn-cancel" onclick="closeModal()">取消</button>
+                    <button class="btn btn-confirm" onclick="saveSymbol()">保存</button>
+                </div>
+            `;
+            modal.classList.add('open');
+        }
+
+        async function saveSymbol() {
+            const symbol = document.getElementById('mSymSymbol').value.trim();
+            const point_value = parseFloat(document.getElementById('mSymPoint').value);
+            const tick_size = parseFloat(document.getElementById('mSymTick').value);
+            const open_fee_rate = parseFloat(document.getElementById('mSymOpenRate').value);
+            const close_fee_rate = parseFloat(document.getElementById('mSymCloseRate').value);
+            if (!symbol || isNaN(point_value) || isNaN(tick_size) || isNaN(open_fee_rate) || isNaN(close_fee_rate)) {
+                alert('请完整填写');
+                return;
+            }
+            try {
+                await apiRequest('/symbols', { method: 'POST', body: JSON.stringify({ symbol, point_value, tick_size, open_fee_rate, close_fee_rate }) });
+                closeModal();
+                renderPage(currentPage);
+            } catch (e) {
+                alert('保存失败：' + e.message);
+            }
+        }
+
+        async function deleteSymbol(symbol) {
+            if (!confirm(`确认删除品种「${symbol}」？`)) return;
+            try {
+                await apiRequest(`/symbols/${symbol}`, { method: 'DELETE' });
+                renderPage(currentPage);
+            } catch (e) {
+                alert('删除失败：' + e.message);
+            }
+        }
+
+        function exportSymbols() { alert('导出功能暂未实现'); }
+
         // ---- 批量导入品种 ----
         function openImportSymbols() {
             const modal = document.getElementById('modalOverlay');
@@ -545,9 +784,160 @@
             reader.readAsArrayBuffer(file);
         }
 
-        // ---- 其他功能（修改密码、用户管理等）沿用之前，此处略 ----
-        // 为节省篇幅，下面的函数请保留您之前的实现：saveUserCapital, openAddSymbol, saveSymbol, deleteSymbol, exportSymbols,
-        // renderUsers, openAddUser, saveNewUser, deleteUser, openEditUserPwd, saveEditUserPwd, openChangePwd, saveChangePwd 等。
+        // ---- 品种编辑（占位） ----
+        function editSymbol(symbol) {
+            alert('编辑功能暂未实现，可删除后重新添加');
+        }
+
+        // ======================================================================
+        //  用户管理 (管理员)
+        // ======================================================================
+        async function renderUsers(area) {
+            if (currentUser.role !== 'admin') {
+                area.innerHTML = `<div class="page-title">👥 用户管理</div><div class="empty-msg">权限不足</div>`;
+                return;
+            }
+            try {
+                const users = await apiRequest('/users');
+                let html = `<div class="page-title">👥 用户管理</div>
+                            <div class="toolbar">
+                                <button class="btn btn-primary" onclick="openAddUser()">＋ 新增用户</button>
+                                <span style="color:var(--text-secondary);font-size:13px;margin-left:auto;">共 ${users.length} 个用户</span>
+                            </div>
+                            <div class="scroll-wrap"><table><thead><tr><th>用户名</th><th>角色</th><th>初始资金</th><th>密码</th><th>操作</th></tr></thead><tbody>`;
+                users.forEach(u => {
+                    html += `<tr>
+                                <td><strong>${u.username}</strong></td>
+                                <td>${u.role === 'admin' ? '管理员' : '交易员'}</td>
+                                <td>${u.role === 'admin' ? '—' : formatCurrency(u.initial_capital)}</td>
+                                <td><code style="background:var(--bg-input);padding:2px 10px;border-radius:4px;">****</code></td>
+                                <td>
+                                    <button class="btn" style="padding:2px 10px;font-size:12px;color:var(--gold);" onclick="openEditUserPwd('${u.username}')">🔑 改密</button>
+                                    ${u.username === 'admin' ? '' : `<button class="btn" style="padding:2px 10px;font-size:12px;color:var(--red-loss);" onclick="deleteUser('${u.username}')">✕ 删除</button>`}
+                                </td>
+                            </tr>`;
+                });
+                html += `</tbody></table></div>`;
+                area.innerHTML = html;
+            } catch (e) {
+                area.innerHTML = `<div class="empty-msg">加载用户失败：${e.message}</div>`;
+            }
+        }
+
+        // ---- 新增用户 ----
+        function openAddUser() {
+            const modal = document.getElementById('modalOverlay');
+            const box = document.getElementById('modalBox');
+            box.innerHTML = `
+                <h3>新增用户</h3>
+                <label>用户名</label><input id="mNewUser">
+                <label>密码</label><input id="mNewPass" type="text">
+                <label>角色</label>
+                <select id="mNewRole">
+                    <option value="trader">交易员</option>
+                    <option value="admin">管理员</option>
+                </select>
+                <div id="capitalInputGroup">
+                    <label>初始资金（仅交易员）</label>
+                    <input id="mNewCapital" type="number" step="any" value="50000">
+                </div>
+                <div class="btn-row">
+                    <button class="btn btn-cancel" onclick="closeModal()">取消</button>
+                    <button class="btn btn-confirm" onclick="saveNewUser()">添加</button>
+                </div>
+            `;
+            modal.classList.add('open');
+            document.getElementById('capitalInputGroup').style.display = 'block';
+            document.getElementById('mNewRole').onchange = function() {
+                document.getElementById('capitalInputGroup').style.display = (this.value === 'trader') ? 'block' : 'none';
+            };
+        }
+
+        async function saveNewUser() {
+            const username = document.getElementById('mNewUser').value.trim();
+            const password = document.getElementById('mNewPass').value.trim();
+            const role = document.getElementById('mNewRole').value;
+            const initial_capital = role === 'trader' ? parseFloat(document.getElementById('mNewCapital').value) || 50000 : 0;
+            if (!username || !password) { alert('请填写完整'); return; }
+            try {
+                await apiRequest('/users', { method: 'POST', body: JSON.stringify({ username, password, role, initial_capital }) });
+                closeModal();
+                renderPage(currentPage);
+                populateUserSwitch();
+            } catch (e) {
+                alert('添加失败：' + e.message);
+            }
+        }
+
+        async function deleteUser(username) {
+            if (!confirm(`删除用户「${username}」？`)) return;
+            try {
+                await apiRequest(`/users/${username}`, { method: 'DELETE' });
+                renderPage(currentPage);
+                populateUserSwitch();
+            } catch (e) {
+                alert('删除失败：' + e.message);
+            }
+        }
+
+        function openEditUserPwd(username) {
+            const modal = document.getElementById('modalOverlay');
+            const box = document.getElementById('modalBox');
+            box.innerHTML = `
+                <h3>修改密码 - ${username}</h3>
+                <label>新密码</label><input id="mEditPwd" type="text">
+                <div class="btn-row">
+                    <button class="btn btn-cancel" onclick="closeModal()">取消</button>
+                    <button class="btn btn-confirm" onclick="saveEditUserPwd('${username}')">保存</button>
+                </div>
+            `;
+            modal.classList.add('open');
+        }
+
+        async function saveEditUserPwd(username) {
+            const newPwd = document.getElementById('mEditPwd').value.trim();
+            if (!newPwd) { alert('请输入新密码'); return; }
+            try {
+                await apiRequest(`/users/${username}/password`, { method: 'PUT', body: JSON.stringify({ password: newPwd }) });
+                closeModal();
+                renderPage(currentPage);
+            } catch (e) {
+                alert('修改失败：' + e.message);
+            }
+        }
+
+        // ---- 修改当前用户密码 ----
+        function openChangePwd() {
+            const modal = document.getElementById('modalOverlay');
+            const box = document.getElementById('modalBox');
+            box.innerHTML = `
+                <h3>🔑 修改密码</h3>
+                <label>当前用户：<strong>${currentUser.username}</strong></label>
+                <label>旧密码</label><input id="mOldPwd" type="password">
+                <label>新密码</label><input id="mNewPwdSelf" type="password">
+                <label>确认新密码</label><input id="mNewPwdSelf2" type="password">
+                <div class="btn-row">
+                    <button class="btn btn-cancel" onclick="closeModal()">取消</button>
+                    <button class="btn btn-confirm" onclick="saveChangePwd()">确认修改</button>
+                </div>
+            `;
+            modal.classList.add('open');
+        }
+
+        async function saveChangePwd() {
+            const oldPwd = document.getElementById('mOldPwd').value.trim();
+            const newPwd = document.getElementById('mNewPwdSelf').value.trim();
+            const newPwd2 = document.getElementById('mNewPwdSelf2').value.trim();
+            if (!oldPwd || !newPwd || !newPwd2) { alert('请完整填写所有字段'); return; }
+            if (newPwd !== newPwd2) { alert('两次输入的新密码不一致'); return; }
+            try {
+                await apiRequest('/users/change-password', { method: 'PUT', body: JSON.stringify({ username: currentUser.username, oldPassword: oldPwd, newPassword: newPwd }) });
+                alert('密码修改成功，请重新登录');
+                doLogout();
+            } catch (e) {
+                alert('修改失败：' + e.message);
+            }
+        }
 
         // ======================================================================
         //  模态框工具

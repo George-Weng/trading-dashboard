@@ -4,6 +4,7 @@ export async function onRequest(context) {
     const { request, env } = context;
     const db = env.DB;
 
+    // 验证 JWT
     const authHeader = request.headers.get('Authorization');
     const token = authHeader && authHeader.split(' ')[1];
     if (!token) return new Response(JSON.stringify({ error: '未授权' }), { status: 401 });
@@ -14,7 +15,7 @@ export async function onRequest(context) {
     const url = new URL(request.url);
     const pathname = url.pathname;
 
-    // ===== GET =====
+    // ========== GET ==========
     if (request.method === 'GET') {
         const targetUser = url.searchParams.get('user');
         let query = 'SELECT * FROM trades';
@@ -31,7 +32,7 @@ export async function onRequest(context) {
         return new Response(JSON.stringify(results), { headers: { 'Content-Type': 'application/json' } });
     }
 
-    // ===== POST 单条 =====
+    // ========== POST 单条 ==========
     if (request.method === 'POST' && !pathname.endsWith('/batch')) {
         const tradeData = await request.json();
         let targetUser = tradeData.username;
@@ -61,7 +62,7 @@ export async function onRequest(context) {
         }
     }
 
-    // ===== POST 批量 =====
+    // ========== POST 批量 ==========
     if (request.method === 'POST' && pathname.endsWith('/batch')) {
         const trades = await request.json();
         if (!Array.isArray(trades) || trades.length === 0) {
@@ -94,7 +95,7 @@ export async function onRequest(context) {
         });
     }
 
-    // ===== PUT 更新单条 =====
+    // ========== PUT 更新单条（路径参数） ==========
     if (request.method === 'PUT') {
         // 路径格式 /api/trades/123
         const id = pathname.split('/').pop();
@@ -132,7 +133,7 @@ export async function onRequest(context) {
         }
     }
 
-    // ===== DELETE =====
+    // ========== DELETE ==========
     if (request.method === 'DELETE') {
         const id = pathname.split('/').pop();
         // 如果路径包含数字ID，删除单条
@@ -149,7 +150,7 @@ export async function onRequest(context) {
                 return new Response(JSON.stringify({ error: '删除失败' }), { status: 500 });
             }
         } else {
-            // 清空（仅管理员）
+            // 清空（仅管理员），带 user 查询参数
             if (role !== 'admin') return new Response(JSON.stringify({ error: '权限不足' }), { status: 403 });
             const targetUser = url.searchParams.get('user');
             let query = 'DELETE FROM trades';

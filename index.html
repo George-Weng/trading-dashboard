@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>交易数据分析看板 - 云端版</title>
-    <!-- Chart.js 使用可靠 CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
@@ -12,7 +11,8 @@
         :root {
             --bg-dark: #0b0e14; --bg-card: #131a22; --bg-input: #1c2632;
             --border-color: #2a3a4a; --text-primary: #e8edf2; --text-secondary: #8a9aa8;
-            --gold: #d4a843; --gold-dim: #a5832e; --green-profit: #4ecdc4; --red-loss: #ff6b6b;
+            --gold: #d4a843; --gold-dim: #a5832e;
+            --green-profit: #4ecdc4; --red-loss: #ff6b6b;
             --shadow: 0 8px 32px rgba(0,0,0,0.6); --radius: 10px; --transition: 0.25s ease;
         }
         html, body { height:100%; font-family:'Segoe UI','PingFang SC',Roboto,sans-serif; background:var(--bg-dark); color:var(--text-primary); }
@@ -406,9 +406,9 @@
                 area.innerHTML = `
                     <div class="page-title">📊 数据总览 <small>${label}</small></div>
                     <div class="kpi-grid">
-                        <div class="kpi-card"><div class="label">当前权益</div><div class="value" style="color:${equity>=totalCapital?'var(--green-profit)':'var(--red-loss)'};">${formatCurrency(equity)}</div></div>
-                        <div class="kpi-card"><div class="label">总盈亏金额</div><div class="value" style="color:${totalProfit>=0?'var(--green-profit)':'var(--red-loss)'};">${totalProfit>=0?'+':''}${formatCurrency(totalProfit)}</div></div>
-                        <div class="kpi-card"><div class="label">盈亏比例</div><div class="value" style="color:${profitRate>=0?'var(--green-profit)':'var(--red-loss)'};">${profitRate>=0?'+':''}${profitRate.toFixed(2)}%</div></div>
+                        <div class="kpi-card"><div class="label">当前权益</div><div class="value" style="color:${equity>=totalCapital?'var(--red-loss)':'var(--green-profit)'};">${formatCurrency(equity)}</div></div>
+                        <div class="kpi-card"><div class="label">总盈亏金额</div><div class="value" style="color:${totalProfit>=0?'var(--red-loss)':'var(--green-profit)'};">${totalProfit>=0?'+':''}${formatCurrency(totalProfit)}</div></div>
+                        <div class="kpi-card"><div class="label">盈亏比例</div><div class="value" style="color:${profitRate>=0?'var(--red-loss)':'var(--green-profit)'};">${profitRate>=0?'+':''}${profitRate.toFixed(2)}%</div></div>
                         <div class="kpi-card"><div class="label">交易胜率</div><div class="value">${winRate.toFixed(1)}%</div></div>
                         <div class="kpi-card"><div class="label">交易盈亏比</div><div class="value">${profitFactor}</div></div>
                         <div class="kpi-card"><div class="label">总手续费</div><div class="value">${formatCurrency(totalFee)}</div></div>
@@ -426,11 +426,9 @@
                     </div>
                 `;
 
-                // 延迟绘制图表
                 setTimeout(() => {
                     try {
                         if (typeof Chart === 'undefined') {
-                            // 如果Chart.js未加载，显示提示
                             ['monthlyChart', 'dailyChart', 'weeklyChart'].forEach(id => {
                                 const canvas = document.getElementById(id);
                                 if (canvas && canvas.parentNode) {
@@ -454,10 +452,10 @@
         }
 
         // ======================================================================
-        //  绘制图表函数
+        //  绘制图表函数（盈利红，亏损绿）
         // ======================================================================
         function drawCharts(data) {
-            function getBarColors(arr, pos = '#4ecdc4', neg = '#ff6b6b') {
+            function getBarColors(arr, pos = '#ff6b6b', neg = '#4ecdc4') {
                 return arr.map(v => v > 0 ? pos : (v < 0 ? neg : '#666666'));
             }
 
@@ -577,12 +575,13 @@
                     if (viewingUser === 'all') html += `<th>交易员</th>`;
                     html += `<th>日期</th><th>品种</th><th>方向</th><th>止损</th><th>开仓价</th><th>手数</th><th>平仓价</th><th>盈亏</th><th>操作</th></tr></thead><tbody>`;
                     sorted.forEach(t => {
+                        const color = t.profit >= 0 ? 'var(--red-loss)' : 'var(--green-profit)';
                         html += `<tr>`;
                         if (viewingUser === 'all') html += `<td>${t.username}</td>`;
                         html += `<td>${t.date}</td><td>${t.symbol}</td><td>${t.direction}</td>
                                 <td>${t.stop_loss}</td><td>${t.open_price}</td><td>${t.volume}</td>
                                 <td>${t.close_price || '—'}</td>
-                                <td style="color:${t.profit>=0?'var(--green-profit)':'var(--red-loss)'};">${t.profit>=0?'+':''}${formatCurrency(t.profit)}</td>
+                                <td style="color:${color};">${t.profit>=0?'+':''}${formatCurrency(t.profit)}</td>
                                 <td>
                                     <button class="btn" style="padding:2px 10px;font-size:12px;color:var(--gold);" onclick="editTrade(${t.id})">✎</button>
                                     <button class="btn" style="padding:2px 10px;font-size:12px;color:var(--red-loss);" onclick="deleteTrade(${t.id})">✕</button>

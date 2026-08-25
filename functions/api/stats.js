@@ -5,6 +5,7 @@ export async function onRequest(context) {
         const { request, env } = context;
         const db = env.DB;
 
+        // 验证 JWT
         const authHeader = request.headers.get('Authorization');
         const token = authHeader && authHeader.split(' ')[1];
         if (!token) return new Response(JSON.stringify({ error: '未授权' }), { status: 401 });
@@ -15,6 +16,7 @@ export async function onRequest(context) {
         const url = new URL(request.url);
         const targetUser = url.searchParams.get('user');
 
+        // ----- 构建用户过滤条件 -----
         let userCondition = '';
         const params = [];
         if (role === 'trader') {
@@ -23,9 +25,13 @@ export async function onRequest(context) {
         } else if (role === 'admin' && targetUser) {
             userCondition = 'AND username = ?';
             params.push(targetUser);
+        } else if (role === 'admin' && !targetUser) {
+            // 管理员查看全部交易员：仅统计角色为 trader 的用户
+            userCondition = 'AND username IN (SELECT username FROM users WHERE role = ?)';
+            params.push('trader');
         }
 
-        // ----- 1. KPI -----
+        // ----- 1. KPI（仅已平仓） -----
         const kpiQuery = `
             SELECT 
                 COUNT(*) as totalTrades,
@@ -37,10 +43,9 @@ export async function onRequest(context) {
             FROM trades
             WHERE close_price IS NOT NULL ${userCondition}
         `;
-        const kpiResult = await db.prepare(kpiQuery).bind(...params).first(); // first() 返回单行对象
-        const kpi = kpiResult || {};
+        const kpi = await db.prepare(kpiQuery).bind(...params).first();
 
-        // ----- 2. 总资本 -----
+        // ----- 2. 总资本（同样只统计交易员） -----
         let capitalQuery = 'SELECT SUM(initial_capital) as totalCapital FROM users WHERE role = ?';
         const capitalParams = ['trader'];
         if (role === 'trader') {
@@ -50,10 +55,11 @@ export async function onRequest(context) {
             capitalQuery += ' AND username = ?';
             capitalParams.push(targetUser);
         }
+        // 管理员查看全部：不加额外条件，只统计所有 trader
         const capitalResult = await db.prepare(capitalQuery).bind(...capitalParams).first();
         const totalCapital = capitalResult?.totalCapital || 0;
 
-        // ----- 3. 月度 -----
+        // ----- 3. 月度盈亏 -----
         const monthQuery = `
             SELECT substr(date, 6, 2) as month, SUM(profit) as profit
             FROM trades
@@ -61,16 +67,16 @@ export async function onRequest(context) {
             GROUP BY substr(date, 6, 2)
             ORDER BY month
         `;
-        const { results: monthResults } = await db.prepare(monthQuery).bind(...params).all();
+        const monthResults = await db.prepare(monthQuery).bind(...params).all();
         const monthMap = {};
-        (monthResults || []).forEach(m => { monthMap[m.month] = m.profit; });
+        monthResults.forEach(m => { monthMap[m.month] = m.profit; });
         const monthlyProfit = [];
         for (let i = 1; i <= 12; i++) {
             const key = String(i).padStart(2, '0');
             monthlyProfit.push(monthMap[key] || 0);
         }
 
-        // ----- 4. 每日（近30天） -----
+        // ----- 4. 每日盈亏（近30天） -----
         const dailyQuery = `
             SELECT date, SUM(profit) as profit
             FROM trades
@@ -79,23 +85,46 @@ export async function onRequest(context) {
             GROUP BY date
             ORDER BY date
         `;
-        const { results: dailyResults } = await db.prepare(dailyQuery).bind(...params).all();
-        const dailyLabels = (dailyResults || []).map(d => d.date);
-        const dailyData = (dailyResults || []).map(d => d.profit || 0);
+        const dailyResults = await db.prepare(dailyQuery).bind(...params).all();
 
-        // ----- 5. 周净值（简化，留空） -----
+        // ----- 5. 周净值（使用更稳健的查询） -----
+        const weeklyQuery = `
+            SELECT 
+                strftime('%Y-%W', date) as week,
+                SUM(profit) as weekProfit
+            FROM trades
+            WHERE close_price IS NOT NULL ${userCondition}
+            GROUP BY week
+            ORDER BY week
+        `;
+        const weeklyResults = await db.prepare(weeklyQuery).bind(...params).all();
+
+        // 构造净值倍数序列
+        let cumProfit = 0;
         const weekLabels = ['初始'];
         const weeklyEquity = [1.0];
+        if (weeklyResults.length > 0) {
+            weeklyResults.forEach(w => {
+                cumProfit += w.weekProfit || 0;
+                const equity = totalCapital > 0 ? (totalCapital + cumProfit) / totalCapital : 1;
+                weeklyEquity.push(parseFloat(equity.toFixed(4)));
+                weekLabels.push(`W${w.week}`);
+            });
+        } else {
+            // 无数据时添加一个默认点
+            weeklyEquity.push(1.0);
+            weekLabels.push('当前');
+        }
 
-        // ----- 6. 返回 -----
+        // ----- 6. 组装返回 -----
         const response = {
             kpi: {
-                totalTrades: kpi.totalTrades || 0,
-                winTrades: kpi.winTrades || 0,
-                totalProfit: kpi.totalProfit || 0,
-                totalFee: kpi.totalFee || 0,
-                totalWin: kpi.totalWin || 0,
-                totalLoss: kpi.totalLoss || 0,
+                totalTrades: kpi?.totalTrades || 0,
+                winTrades: kpi?.winTrades || 0,
+                totalProfit: kpi?.totalProfit || 0,
+                totalFee: kpi?.totalFee || 0,
+                totalWin: kpi?.totalWin || 0,
+                totalLoss: kpi?.totalLoss || 0,
                 totalCapital: totalCapital,
             },
             monthly: {
@@ -103,8 +132,8 @@ export async function onRequest(context) {
                 data: monthlyProfit,
             },
             daily: {
-                labels: dailyLabels,
-                data: dailyData,
+                labels: dailyResults.map(d => d.date),
+                data: dailyResults.map(d => d.profit || 0),
             },
             weekly: {
                 labels: weekLabels,

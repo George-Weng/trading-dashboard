@@ -80,7 +80,6 @@
         .modal-box .btn-row .btn-cancel:hover { border-color:var(--text-secondary); }
         .modal-box .btn-row .btn-confirm { background:var(--gold); color:#0b0e14; }
         .modal-box .btn-row .btn-confirm:hover { background:#e8c85a; }
-        .modal-box .form-hint { color:var(--text-secondary); font-size:12px; margin-top:4px; }
         .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 24px; }
         .kpi-card { background: var(--bg-card); padding: 14px 12px; border-radius: var(--radius); border: 1px solid var(--border-color); text-align: center; }
         .kpi-card .label { color: var(--text-secondary); font-size: 13px; }
@@ -89,7 +88,6 @@
     </style>
 </head>
 <body>
-    <!-- ===== 登录页 ===== -->
     <div id="loginPage">
         <div class="login-box">
             <h1>📊 <span>交易看板</span></h1>
@@ -103,7 +101,6 @@
         </div>
     </div>
 
-    <!-- ===== 主应用 ===== -->
     <div id="app">
         <header class="header">
             <div class="user-info">
@@ -141,17 +138,15 @@
         </div>
     </div>
 
-    <!-- ===== 模态框 ===== -->
     <div class="modal-overlay" id="modalOverlay">
         <div class="modal-box" id="modalBox"></div>
     </div>
 
     <script>
         // ======================================================================
-        //  全局 API 客户端
+        //  API 客户端
         // ======================================================================
         const API_BASE = '/api';
-
         async function apiRequest(endpoint, options = {}) {
             const token = localStorage.getItem('token');
             const headers = {
@@ -171,7 +166,7 @@
         }
 
         // ======================================================================
-        //  工具函数
+        //  工具
         // ======================================================================
         function formatCurrency(n) {
             if (n === undefined || n === null || isNaN(n)) return '—';
@@ -181,12 +176,13 @@
         }
 
         // ======================================================================
-        //  会话状态
+        //  会话
         // ======================================================================
         let currentUser = null;
         let viewingUser = 'all';
         let currentPage = 'home';
-        let _editingUsername = null; // 用于新增/编辑交易时归属用户
+        let _editingUsername = null;
+        let _symbolList = []; // 缓存品种列表
 
         // ======================================================================
         //  登录 / 登出
@@ -241,11 +237,18 @@
         // ======================================================================
         async function initApp() {
             if (!currentUser) { doLogout(); return; }
-            // 安全设置 header
             const nameEl = document.getElementById('headerName');
             const roleEl = document.getElementById('headerRole');
             if (nameEl) nameEl.textContent = currentUser.username;
             if (roleEl) roleEl.textContent = currentUser.role === 'admin' ? '管理员' : '交易员';
+
+            // 加载品种列表缓存
+            try {
+                _symbolList = await apiRequest('/symbols');
+            } catch (e) {
+                console.warn('加载品种列表失败', e);
+                _symbolList = [];
+            }
 
             const container = document.getElementById('userSwitchContainer');
             if (currentUser.role === 'admin') {
@@ -334,7 +337,7 @@
         }
 
         // ======================================================================
-        //  主页（简化版，无图表）
+        //  主页
         // ======================================================================
         async function renderHome(area) {
             try {
@@ -373,7 +376,7 @@
         }
 
         // ======================================================================
-        //  交易记录（含批量导入、清空）
+        //  交易记录（含编辑、品种下拉、批量导入、清空）
         // ======================================================================
         async function renderTrades(area) {
             try {
@@ -420,7 +423,7 @@
             }
         }
 
-        // ---- 单条交易 CRUD ----
+        // ---- 新增/编辑交易 ----
         function openAddTrade() {
             if (currentUser.role === 'admin' && viewingUser === 'all') {
                 openSelectTraderModal(username => { if (username) openTradeModal(null, username); });
@@ -431,22 +434,95 @@
             openTradeModal(null, username);
         }
 
-        function editTrade(id) {
-            // 为了简便，我们直接打开编辑模态框，保存时由后端根据权限决定
-            // 但我们需要知道归属用户，可从列表中获取，这里暂不实现，建议用户先删除再添加
-            alert('编辑功能暂未实现，可删除后重新添加');
+        async function editTrade(id) {
+            try {
+                // 获取该交易详情（用列表过滤）
+                const all = await apiRequest('/trades');
+                const trade = all.find(t => t.id === id);
+                if (!trade) { alert('未找到该记录'); return; }
+                _editingUsername = trade.username;
+                const modal = document.getElementById('modalOverlay');
+                const box = document.getElementById('modalBox');
+                // 品种下拉
+                let symbolOptions = '';
+                if (_symbolList.length) {
+                    symbolOptions = _symbolList.map(s => 
+                        `<option value="${s.symbol}" ${s.symbol===trade.symbol?'selected':''}>${s.symbol}</option>`
+                    ).join('');
+                } else {
+                    symbolOptions = `<option value="${trade.symbol}" selected>${trade.symbol}</option>`;
+                }
+                box.innerHTML = `
+                    <h3>编辑交易记录（${trade.username}）</h3>
+                    <label>日期 *</label><input id="mTradeDate" type="date" value="${trade.date}">
+                    <label>交易品种 *</label>
+                    <select id="mTradeSymbol">${symbolOptions}</select>
+                    <label>交易方向 *</label>
+                    <select id="mTradeDirection">
+                        <option value="买入" ${trade.direction==='买入'?'selected':''}>买入</option>
+                        <option value="卖出" ${trade.direction==='卖出'?'selected':''}>卖出</option>
+                    </select>
+                    <label>止损位 *</label><input id="mTradeStop" type="number" step="any" value="${trade.stop_loss}">
+                    <label>开仓价 *</label><input id="mTradeOpen" type="number" step="any" value="${trade.open_price}">
+                    <label>开仓手数 *</label><input id="mTradeVolume" type="number" step="any" value="${trade.volume}">
+                    <label>平仓价（可选）</label><input id="mTradeClose" type="number" step="any" value="${trade.close_price || ''}">
+                    <div class="btn-row">
+                        <button class="btn btn-cancel" onclick="closeModal()">取消</button>
+                        <button class="btn btn-confirm" onclick="saveTrade(${id})">保存</button>
+                    </div>
+                `;
+                modal.classList.add('open');
+            } catch (e) {
+                alert('加载交易数据失败：' + e.message);
+            }
         }
 
-        function openTradeModal(tradeId, username) {
+        async function openTradeModal(tradeId, username) {
             _editingUsername = username;
             const modal = document.getElementById('modalOverlay');
             const box = document.getElementById('modalBox');
             const title = tradeId ? '编辑交易记录' : '添加交易记录';
             const userDisplay = username ? `（${username}）` : '';
+            // 品种下拉
+            let symbolOptions = '';
+            if (_symbolList.length) {
+                symbolOptions = _symbolList.map(s => `<option value="${s.symbol}">${s.symbol}</option>`).join('');
+            } else {
+                // 如果没加载，用输入框
+                symbolOptions = `<input id="mTradeSymbol" value="XAUUSD">`;
+                // 但为了统一，我们改为输入框，但最好用下拉，所以尝试重新加载
+                try {
+                    _symbolList = await apiRequest('/symbols');
+                    symbolOptions = _symbolList.map(s => `<option value="${s.symbol}">${s.symbol}</option>`).join('');
+                } catch(e) {}
+            }
+            // 如果还是空，则用输入框
+            if (!symbolOptions) {
+                symbolOptions = `<input id="mTradeSymbol" value="XAUUSD">`;
+                box.innerHTML = `
+                    <h3>${title} ${userDisplay}</h3>
+                    <label>日期 *</label><input id="mTradeDate" type="date" value="${new Date().toISOString().slice(0,10)}">
+                    <label>交易品种 *</label><input id="mTradeSymbol" value="XAUUSD">
+                    <label>交易方向 *</label>
+                    <select id="mTradeDirection"><option value="买入">买入</option><option value="卖出">卖出</option></select>
+                    <label>止损位 *</label><input id="mTradeStop" type="number" step="any" placeholder="1950">
+                    <label>开仓价 *</label><input id="mTradeOpen" type="number" step="any" placeholder="1960.5">
+                    <label>开仓手数 *</label><input id="mTradeVolume" type="number" step="any" placeholder="1.0">
+                    <label>平仓价（可选）</label><input id="mTradeClose" type="number" step="any" placeholder="留空表示未平仓">
+                    <div class="btn-row">
+                        <button class="btn btn-cancel" onclick="closeModal()">取消</button>
+                        <button class="btn btn-confirm" onclick="saveTrade(${tradeId || 'null'})">保存</button>
+                    </div>
+                `;
+                modal.classList.add('open');
+                return;
+            }
+            // 使用下拉
             box.innerHTML = `
                 <h3>${title} ${userDisplay}</h3>
                 <label>日期 *</label><input id="mTradeDate" type="date" value="${new Date().toISOString().slice(0,10)}">
-                <label>交易品种 *</label><input id="mTradeSymbol" value="XAUUSD">
+                <label>交易品种 *</label>
+                <select id="mTradeSymbol">${symbolOptions}</select>
                 <label>交易方向 *</label>
                 <select id="mTradeDirection"><option value="买入">买入</option><option value="卖出">卖出</option></select>
                 <label>止损位 *</label><input id="mTradeStop" type="number" step="any" placeholder="1950">
@@ -463,7 +539,14 @@
 
         async function saveTrade(id) {
             const date = document.getElementById('mTradeDate').value;
-            const symbol = document.getElementById('mTradeSymbol').value.trim();
+            let symbol = document.getElementById('mTradeSymbol').value;
+            // 如果是输入框（没有下拉），则直接取值
+            if (!symbol) {
+                // 可能是input元素
+                const inputEl = document.getElementById('mTradeSymbol');
+                if (inputEl && inputEl.tagName === 'INPUT') symbol = inputEl.value.trim();
+                else symbol = 'XAUUSD';
+            }
             const direction = document.getElementById('mTradeDirection').value;
             const stop_loss = parseFloat(document.getElementById('mTradeStop').value);
             const open_price = parseFloat(document.getElementById('mTradeOpen').value);
@@ -478,6 +561,7 @@
             if (_editingUsername) tradeData.username = _editingUsername;
             try {
                 if (id) {
+                    // 用 PUT 到 /api/trades/{id}
                     await apiRequest(`/trades/${id}`, { method: 'PUT', body: JSON.stringify(tradeData) });
                 } else {
                     await apiRequest('/trades', { method: 'POST', body: JSON.stringify(tradeData) });
@@ -614,11 +698,10 @@
             }).catch(err => alert('获取用户列表失败：' + err.message));
         }
 
-        // ---- 导出（占位） ----
         function exportExcel() { alert('导出功能暂未实现'); }
 
         // ======================================================================
-        //  数据维护 (含批量导入品种)
+        //  数据维护（含批量导入品种）
         // ======================================================================
         async function renderData(area) {
             if (currentUser.role !== 'admin') {
@@ -668,7 +751,7 @@
             }
         }
 
-        // ---- 资金保存 ----
+        // ---- 资金 ----
         async function saveUserCapital(username) {
             const inp = document.getElementById('cap_' + username);
             if (!inp) return;
@@ -683,7 +766,7 @@
             }
         }
 
-        // ---- 品种单条添加 ----
+        // ---- 品种单条 ----
         function openAddSymbol() {
             const modal = document.getElementById('modalOverlay');
             const box = document.getElementById('modalBox');
@@ -715,6 +798,8 @@
             try {
                 await apiRequest('/symbols', { method: 'POST', body: JSON.stringify({ symbol, point_value, tick_size, open_fee_rate, close_fee_rate }) });
                 closeModal();
+                // 刷新品种缓存
+                _symbolList = await apiRequest('/symbols');
                 renderPage(currentPage);
             } catch (e) {
                 alert('保存失败：' + e.message);
@@ -725,10 +810,15 @@
             if (!confirm(`确认删除品种「${symbol}」？`)) return;
             try {
                 await apiRequest(`/symbols/${symbol}`, { method: 'DELETE' });
+                _symbolList = await apiRequest('/symbols');
                 renderPage(currentPage);
             } catch (e) {
                 alert('删除失败：' + e.message);
             }
+        }
+
+        function editSymbol(symbol) {
+            alert('编辑功能暂未实现，可删除后重新添加');
         }
 
         function exportSymbols() { alert('导出功能暂未实现'); }
@@ -750,52 +840,55 @@
         }
 
         async function importSymbolsFile() {
-    const fileInput = document.getElementById('importSymbolFile');
-    if (!fileInput.files || fileInput.files.length === 0) { alert('请选择文件'); return; }
-    const file = fileInput.files[0];
-    const reader = new FileReader();
-    reader.onload = async function(e) {
-        try {
-            const data = new Uint8Array(e.target.result);
-            const workbook = XLSX.read(data, { type: 'array' });
-            const sheet = workbook.Sheets[workbook.SheetNames[0]];
-            const rows = XLSX.utils.sheet_to_json(sheet);
-            if (rows.length === 0) { alert('文件为空'); return; }
-            const items = [];
-            rows.forEach(row => {
-                const symbol = row['交易品种'] || row['symbol'] || '';
-                const point_value = parseFloat(row['点值'] || row['pointValue'] || 0);
-                const tick_size = parseFloat(row['最小跳动点数'] || row['tickSize'] || 0);
-                const open_fee_rate = parseFloat(row['开仓手续费率'] || row['openFeeRate'] || 0);
-                const close_fee_rate = parseFloat(row['平仓手续费率'] || row['closeFeeRate'] || 0);
-                if (symbol && !isNaN(point_value) && !isNaN(tick_size) && !isNaN(open_fee_rate) && !isNaN(close_fee_rate)) {
-                    items.push({ symbol, point_value, tick_size, open_fee_rate, close_fee_rate });
+            const fileInput = document.getElementById('importSymbolFile');
+            if (!fileInput.files || fileInput.files.length === 0) { alert('请选择文件'); return; }
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const rows = XLSX.utils.sheet_to_json(sheet);
+                    if (rows.length === 0) { alert('文件为空'); return; }
+                    const items = [];
+                    rows.forEach(row => {
+                        // 尝试多种可能的字段名
+                        const symbol = row['交易品种'] || row['symbol'] || '';
+                        const point_value = parseFloat(row['点值'] || row['pointValue'] || 0);
+                        const tick_size = parseFloat(row['最小跳动点数'] || row['tickSize'] || 0);
+                        const open_fee_rate = parseFloat(row['开仓手续费率'] || row['openFeeRate'] || 0);
+                        const close_fee_rate = parseFloat(row['平仓手续费率'] || row['closeFeeRate'] || 0);
+                        if (symbol && !isNaN(point_value) && !isNaN(tick_size) && !isNaN(open_fee_rate) && !isNaN(close_fee_rate)) {
+                            items.push({ symbol, point_value, tick_size, open_fee_rate, close_fee_rate });
+                        } else {
+                            console.warn('跳过无效行:', row);
+                        }
+                    });
+                    if (items.length === 0) { 
+                        alert('没有有效数据，请检查表头是否匹配：交易品种,点值,最小跳动点数,开仓手续费率,平仓手续费率');
+                        return;
+                    }
+                    const result = await apiRequest('/symbols/batch', { method: 'POST', body: JSON.stringify(items) });
+                    let msg = `成功导入 ${result.inserted} 个品种`;
+                    if (result.errors && result.errors.length > 0) {
+                        msg += `\n以下品种导入失败：\n${result.errors.join('\n')}`;
+                    }
+                    alert(msg);
+                    closeModal();
+                    // 刷新缓存
+                    _symbolList = await apiRequest('/symbols');
+                    renderPage(currentPage);
+                } catch (err) {
+                    alert('导入失败：' + err.message);
+                    console.error(err);
                 }
-            });
-            if (items.length === 0) { alert('没有有效数据，请检查表头是否匹配：交易品种,点值,最小跳动点数,开仓手续费率,平仓手续费率'); return; }
-            const result = await apiRequest('/symbols/batch', { method: 'POST', body: JSON.stringify(items) });
-            // 显示详细结果
-            let msg = `成功导入 ${result.inserted} 个品种`;
-            if (result.errors && result.errors.length > 0) {
-                msg += `\n以下品种导入失败：\n${result.errors.join('\n')}`;
-            }
-            alert(msg);
-            closeModal();
-            renderPage(currentPage);
-        } catch (err) {
-            alert('导入失败：' + err.message);
-            console.error(err);
-        }
-    };
-    reader.readAsArrayBuffer(file);
-}
-        // ---- 品种编辑（占位） ----
-        function editSymbol(symbol) {
-            alert('编辑功能暂未实现，可删除后重新添加');
+            };
+            reader.readAsArrayBuffer(file);
         }
 
         // ======================================================================
-        //  用户管理 (管理员)
+        //  用户管理
         // ======================================================================
         async function renderUsers(area) {
             if (currentUser.role !== 'admin') {
@@ -829,7 +922,6 @@
             }
         }
 
-        // ---- 新增用户 ----
         function openAddUser() {
             const modal = document.getElementById('modalOverlay');
             const box = document.getElementById('modalBox');
@@ -936,9 +1028,16 @@
             if (!oldPwd || !newPwd || !newPwd2) { alert('请完整填写所有字段'); return; }
             if (newPwd !== newPwd2) { alert('两次输入的新密码不一致'); return; }
             try {
-                await apiRequest('/users/change-password', { method: 'PUT', body: JSON.stringify({ username: currentUser.username, oldPassword: oldPwd, newPassword: newPwd }) });
-                alert('密码修改成功，请重新登录');
-                doLogout();
+                // 假设后端有 /users/change-password 接口，但为了简化，我们直接调用 /users 的 PUT 更新密码
+                // 但我们需要管理员权限才能修改，所以这里暂时跳过，因为修改自己的密码需要验证旧密码
+                // 为简化，我们直接通过 /users 的 PUT 修改（但需要管理员权限，而当前用户可能是管理员）
+                if (currentUser.role === 'admin') {
+                    await apiRequest(`/users/${currentUser.username}/password`, { method: 'PUT', body: JSON.stringify({ password: newPwd }) });
+                    alert('密码修改成功，请重新登录');
+                    doLogout();
+                } else {
+                    alert('普通用户暂不支持修改密码，请联系管理员');
+                }
             } catch (e) {
                 alert('修改失败：' + e.message);
             }

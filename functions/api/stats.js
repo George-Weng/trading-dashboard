@@ -5,7 +5,6 @@ export async function onRequest(context) {
         const { request, env } = context;
         const db = env.DB;
 
-        // 验证 JWT
         const authHeader = request.headers.get('Authorization');
         const token = authHeader && authHeader.split(' ')[1];
         if (!token) return new Response(JSON.stringify({ error: '未授权' }), { status: 401 });
@@ -25,9 +24,8 @@ export async function onRequest(context) {
             userCondition = 'AND username = ?';
             params.push(targetUser);
         }
-        // 管理员且未指定用户，统计所有交易员（userCondition 为空）
 
-        // ----- 1. KPI（仅已平仓） -----
+        // ----- 1. KPI -----
         const kpiQuery = `
             SELECT 
                 COUNT(*) as totalTrades,
@@ -39,7 +37,8 @@ export async function onRequest(context) {
             FROM trades
             WHERE close_price IS NOT NULL ${userCondition}
         `;
-        const kpi = await db.prepare(kpiQuery).bind(...params).first();
+        const kpiResult = await db.prepare(kpiQuery).bind(...params).first(); // first() 返回单行对象
+        const kpi = kpiResult || {};
 
         // ----- 2. 总资本 -----
         let capitalQuery = 'SELECT SUM(initial_capital) as totalCapital FROM users WHERE role = ?';
@@ -54,7 +53,7 @@ export async function onRequest(context) {
         const capitalResult = await db.prepare(capitalQuery).bind(...capitalParams).first();
         const totalCapital = capitalResult?.totalCapital || 0;
 
-        // ----- 3. 月度盈亏（使用 substr 提取月份，避免 strftime 兼容问题） -----
+        // ----- 3. 月度 -----
         const monthQuery = `
             SELECT substr(date, 6, 2) as month, SUM(profit) as profit
             FROM trades
@@ -62,16 +61,16 @@ export async function onRequest(context) {
             GROUP BY substr(date, 6, 2)
             ORDER BY month
         `;
-        const monthResults = await db.prepare(monthQuery).bind(...params).all();
+        const { results: monthResults } = await db.prepare(monthQuery).bind(...params).all();
         const monthMap = {};
-        monthResults.forEach(m => { monthMap[m.month] = m.profit; });
+        (monthResults || []).forEach(m => { monthMap[m.month] = m.profit; });
         const monthlyProfit = [];
         for (let i = 1; i <= 12; i++) {
             const key = String(i).padStart(2, '0');
             monthlyProfit.push(monthMap[key] || 0);
         }
 
-        // ----- 4. 每日盈亏（近30天） -----
+        // ----- 4. 每日（近30天） -----
         const dailyQuery = `
             SELECT date, SUM(profit) as profit
             FROM trades
@@ -80,21 +79,23 @@ export async function onRequest(context) {
             GROUP BY date
             ORDER BY date
         `;
-        const dailyResults = await db.prepare(dailyQuery).bind(...params).all();
+        const { results: dailyResults } = await db.prepare(dailyQuery).bind(...params).all();
+        const dailyLabels = (dailyResults || []).map(d => d.date);
+        const dailyData = (dailyResults || []).map(d => d.profit || 0);
 
-        // ----- 5. 周净值（暂时简化，留空以免出错） -----
+        // ----- 5. 周净值（简化，留空） -----
         const weekLabels = ['初始'];
         const weeklyEquity = [1.0];
 
-        // ----- 6. 组装返回 -----
+        // ----- 6. 返回 -----
         const response = {
             kpi: {
-                totalTrades: kpi?.totalTrades || 0,
-                winTrades: kpi?.winTrades || 0,
-                totalProfit: kpi?.totalProfit || 0,
-                totalFee: kpi?.totalFee || 0,
-                totalWin: kpi?.totalWin || 0,
-                totalLoss: kpi?.totalLoss || 0,
+                totalTrades: kpi.totalTrades || 0,
+                winTrades: kpi.winTrades || 0,
+                totalProfit: kpi.totalProfit || 0,
+                totalFee: kpi.totalFee || 0,
+                totalWin: kpi.totalWin || 0,
+                totalLoss: kpi.totalLoss || 0,
                 totalCapital: totalCapital,
             },
             monthly: {
@@ -102,8 +103,8 @@ export async function onRequest(context) {
                 data: monthlyProfit,
             },
             daily: {
-                labels: dailyResults.map(d => d.date),
-                data: dailyResults.map(d => d.profit || 0),
+                labels: dailyLabels,
+                data: dailyData,
             },
             weekly: {
                 labels: weekLabels,

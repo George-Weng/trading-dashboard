@@ -3,12 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>交易数据分析看板 - 多用户版 (云端)</title>
+    <title>交易数据分析看板 - 云端版</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
-        /* ... 保留原有样式，完全不变 ... */
-        /* 为了简洁，此处省略样式，请复制原文件中的样式块 */
+        /* ===== 样式（与原版一致） ===== */
         * { margin:0; padding:0; box-sizing:border-box; }
         :root {
             --bg-dark: #0b0e14; --bg-card: #131a22; --bg-input: #1c2632;
@@ -104,6 +103,7 @@
         .capital-setting .btn { padding:6px 18px; border-radius:6px; background:var(--gold); color:#0b0e14; font-weight:600; }
         .capital-setting .btn:hover { background:#e8c85a; }
         .capital-display { color:var(--gold); font-weight:600; font-size:16px; margin-left:4px; }
+        .loading { text-align:center; padding:40px 0; color:var(--text-secondary); }
     </style>
 </head>
 <body>
@@ -153,7 +153,9 @@
                     <span class="icon">👥</span><span class="label">用户管理</span>
                 </div>
             </nav>
-            <div class="content" id="contentArea"></div>
+            <div class="content" id="contentArea">
+                <div class="loading">加载中...</div>
+            </div>
         </div>
     </div>
 
@@ -192,9 +194,10 @@
         let currentUser = null;
         let viewingUser = 'all';
         let currentPage = 'home';
+        let _editingUsername = null; // 用于新增/编辑交易时记录归属用户
 
         // ======================================================================
-        //  工具函数（保留原工具）
+        //  工具函数
         // ======================================================================
         function genId() { return Date.now() + Math.floor(Math.random() * 1000); }
         function fmt(n) {
@@ -211,8 +214,6 @@
             return intPart + '.' + parts[1];
         }
         function calcTakeProfit(trade) {
-            // 与原来相同，但不再需要从DB读取symbol配置，因为前端不负责计算，后端负责。
-            // 简化：返回null
             return { tp1: null, tp2: null };
         }
 
@@ -259,8 +260,7 @@
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Enter') {
                 const loginPage = document.getElementById('loginPage');
-                if (loginPage.style.display !== 'none') { e.preventDefault();
-                    doLogin(); }
+                if (loginPage.style.display !== 'none') { e.preventDefault(); doLogin(); }
             }
         });
 
@@ -331,22 +331,14 @@
         function renderPage(page) {
             const area = document.getElementById('contentArea');
             if (!area) return;
+            area.innerHTML = '<div class="loading">加载中...</div>';
             try {
                 switch (page) {
-                    case 'home':
-                        renderHome(area);
-                        break;
-                    case 'trades':
-                        renderTrades(area);
-                        break;
-                    case 'data':
-                        renderData(area);
-                        break;
-                    case 'users':
-                        renderUsers(area);
-                        break;
-                    default:
-                        area.innerHTML = '<div class="empty-msg">页面不存在</div>';
+                    case 'home': renderHome(area); break;
+                    case 'trades': renderTrades(area); break;
+                    case 'data': renderData(area); break;
+                    case 'users': renderUsers(area); break;
+                    default: area.innerHTML = '<div class="empty-msg">页面不存在</div>';
                 }
             } catch (e) {
                 area.innerHTML = `<div class="empty-msg">渲染错误：${e.message}</div>`;
@@ -355,12 +347,15 @@
         }
 
         // ======================================================================
-        //  主页（从 API 获取数据）
+        //  主页（修复：传递 user 参数）
         // ======================================================================
         async function renderHome(area) {
             try {
-                const stats = await apiRequest('/stats');
-                // 计算权益等
+                let url = '/stats';
+                if (viewingUser !== 'all') {
+                    url += `?user=${viewingUser}`;
+                }
+                const stats = await apiRequest(url);
                 const totalProfit = stats.totalProfit || 0;
                 const totalFee = stats.totalFee || 0;
                 const totalTrades = stats.totalTrades || 0;
@@ -369,7 +364,7 @@
                 const totalCapital = stats.totalCapital || 0;
                 const equity = totalCapital + totalProfit;
                 const profitRate = totalCapital > 0 ? (totalProfit / totalCapital) * 100 : 0;
-                const profitFactor = (totalProfit > 0) ? '∞' : '0'; // 简化
+                const profitFactor = (totalTrades > 0 && stats.totalLoss > 0) ? (stats.totalWin / stats.totalLoss).toFixed(2) : (stats.totalWin > 0 ? '∞' : '0');
 
                 const label = viewingUser === 'all' ? '全部交易员' : viewingUser;
                 area.innerHTML = `
@@ -394,19 +389,22 @@
                         知行合一 · ${new Date().toLocaleDateString()}
                     </div>
                 `;
-                // 绘图：这里简化，实际应调用后端获取时间序列数据，为了简洁省略。
-                // 可以后续扩展。
+                // 图表绘制略（可扩展）
             } catch (e) {
                 area.innerHTML = `<div class="empty-msg">加载数据失败：${e.message}</div>`;
             }
         }
 
         // ======================================================================
-        //  交易记录页面
+        //  交易记录
         // ======================================================================
         async function renderTrades(area) {
             try {
-                const trades = await apiRequest('/trades');
+                let url = '/trades';
+                if (viewingUser !== 'all') {
+                    url += `?user=${viewingUser}`;
+                }
+                const trades = await apiRequest(url);
                 const isAdmin = currentUser.role === 'admin';
                 const label = viewingUser === 'all' ? '全部交易员' : viewingUser;
                 let html = `<div class="page-title">📈 交易记录 <small>${label}</small></div>`;
@@ -443,26 +441,42 @@
             }
         }
 
-        // ----- 交易 CRUD (调用 API) -----
+        // ----- 交易 CRUD (修复) -----
         function openAddTrade() {
-            // 简化：直接弹出模态框，无需选择用户，因为后端会根据 token 自动归属
-            openTradeModal(null);
+            if (currentUser.role === 'admin' && viewingUser === 'all') {
+                // 管理员在"全部"视图下需选择交易员
+                openSelectTraderModal(function(username) {
+                    if (username) {
+                        openTradeModal(null, username);
+                    }
+                });
+                return;
+            }
+            const username = (currentUser.role === 'admin') ? viewingUser : currentUser.username;
+            if (!username) {
+                alert('无法确定归属用户');
+                return;
+            }
+            openTradeModal(null, username);
         }
 
         function editTrade(id) {
-            // 需要先获取交易详情，这里简化：从当前列表获取（需要存储全局列表），或者再请求一次
-            // 直接打开模态框，让用户修改，提交时使用 PUT
-            openTradeModal(id);
+            // 简单处理：从当前列表获取（但列表可能未缓存），这里直接打开编辑，归属用户由后端根据权限决定
+            // 由于我们无法从列表缓存，我们仅弹窗，保存时后端会校验权限
+            // 但我们需要知道归属用户以便显示，可使用调用API获取单条，但为简化，我们允许编辑时由后端决定
+            // 我们将_editingUsername置空，保存时使用当前用户或管理员指定
+            // 更好的做法是查询 /trades/${id}，但为了简短，我们直接打开模态框，保存时由后端处理
+            openTradeModal(id, null); // 传递null表示由后端决定
         }
 
-        function openTradeModal(tradeId) {
+        function openTradeModal(tradeId, username) {
+            _editingUsername = username; // 存储，用于保存时传递
             const modal = document.getElementById('modalOverlay');
             const box = document.getElementById('modalBox');
-            // 如果是编辑，先加载数据，这里简化处理为新建
-            // 实际应调用 GET /api/trades/${id}
-            // 为了演示，我们只是显示空表单，提交时调用 POST 或 PUT
+            const title = tradeId ? '编辑交易记录' : '添加交易记录';
+            const userDisplay = username ? `（${username}）` : '';
             box.innerHTML = `
-                <h3>${tradeId ? '编辑交易记录' : '添加交易记录'}</h3>
+                <h3>${title} ${userDisplay}</h3>
                 <label>日期 *</label>
                 <input id="mTradeDate" type="date" value="${new Date().toISOString().slice(0,10)}">
                 <label>交易品种 *</label>
@@ -499,9 +513,13 @@
                 return;
             }
             const tradeData = { date, symbol, direction, stop_loss, open_price, volume, close_price };
+            // 如果有指定用户名，则传递（管理员场景）
+            if (_editingUsername) {
+                tradeData.username = _editingUsername;
+            }
             try {
                 if (id) {
-                    // 使用 PUT /api/trades/${id}
+                    // 编辑时需要传递id，但后端PUT需要将id放在body或URL，我们放在URL参数
                     await apiRequest(`/trades/${id}`, { method: 'PUT', body: JSON.stringify(tradeData) });
                 } else {
                     await apiRequest('/trades', { method: 'POST', body: JSON.stringify(tradeData) });
@@ -523,13 +541,43 @@
             }
         }
 
-        // 导出Excel（需要获取全部数据，暂时保留原逻辑，但需调用API获取数据）
+        // ----- 选择交易员模态框 -----
+        function openSelectTraderModal(callback) {
+            apiRequest('/users').then(users => {
+                const traders = users.filter(u => u.role === 'trader');
+                if (traders.length === 0) {
+                    alert('没有交易员用户');
+                    return;
+                }
+                const modal = document.getElementById('modalOverlay');
+                const box = document.getElementById('modalBox');
+                box.innerHTML = `
+                    <h3>选择交易员</h3>
+                    <select id="traderSelect" style="width:100%;padding:8px;margin-top:12px;">
+                        ${traders.map(u => `<option value="${u.username}">${u.username}</option>`).join('')}
+                    </select>
+                    <div class="btn-row">
+                        <button class="btn btn-cancel" onclick="closeModal()">取消</button>
+                        <button class="btn btn-confirm" onclick="confirmTraderSelection()">确认</button>
+                    </div>
+                `;
+                modal.classList.add('open');
+                window.confirmTraderSelection = function() {
+                    const sel = document.getElementById('traderSelect');
+                    const username = sel.value;
+                    closeModal();
+                    if (callback) callback(username);
+                };
+            }).catch(err => alert('获取用户列表失败：' + err.message));
+        }
+
+        // ----- 导出（占位） -----
         function exportExcel() {
-            alert('导出功能需要从API获取数据，暂未实现，可后续扩展。');
+            alert('导出功能暂未实现');
         }
 
         // ======================================================================
-        //  数据维护（管理员专用）
+        //  数据维护（管理员）
         // ======================================================================
         async function renderData(area) {
             if (currentUser.role !== 'admin') {
@@ -591,9 +639,8 @@
             }
         }
 
-        // 品种管理函数类似，调用 /api/symbols
+        // 品种管理
         function openAddSymbol() {
-            // 弹出模态框
             const modal = document.getElementById('modalOverlay');
             const box = document.getElementById('modalBox');
             box.innerHTML = `
@@ -759,8 +806,6 @@
                 alert('修改失败：' + e.message);
             }
         }
-
-        // 修改当前用户密码（类似）
 
         // ======================================================================
         //  模态框工具

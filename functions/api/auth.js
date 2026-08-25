@@ -1,10 +1,9 @@
-
 import jwt from '@tsndr/cloudflare-worker-jwt';
 
 export async function onRequest(context) {
     const { request, env } = context;
     if (request.method !== 'POST') {
-        return new Response('Method Not Allowed', { status: 405 });
+        return new Response(JSON.stringify({ error: 'Method Not Allowed' }), { status: 405 });
     }
 
     try {
@@ -12,7 +11,7 @@ export async function onRequest(context) {
         const db = env.DB;
 
         const user = await db.prepare(
-            'SELECT id, username, role FROM users WHERE username = ? AND password = ?'
+            'SELECT id, username, role FROM users WHERE LOWER(username) = LOWER(?) AND password = ?'
         ).bind(username, password).first();
 
         if (!user) {

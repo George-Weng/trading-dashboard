@@ -16,9 +16,11 @@ export async function onRequest(context) {
     }
     const { username, role } = payload;
 
-    // ========== GET ==========
+    const url = new URL(request.url);
+    const pathname = url.pathname;
+
+    // ===== GET 查询 =====
     if (request.method === 'GET') {
-        const url = new URL(request.url);
         const targetUser = url.searchParams.get('user');
         let query = 'SELECT * FROM trades';
         const params = [];
@@ -36,23 +38,20 @@ export async function onRequest(context) {
         });
     }
 
-    // ========== POST 单条 ==========
-    if (request.method === 'POST') {
+    // ===== POST 单条 =====
+    if (request.method === 'POST' && !pathname.endsWith('/batch')) {
         const tradeData = await request.json();
-
-        // 确定归属用户
         let targetUser = tradeData.username;
         if (role === 'trader') {
-            targetUser = username; // 交易员强制使用自己
+            targetUser = username;
         } else if (role === 'admin') {
             if (!targetUser) {
                 return new Response(JSON.stringify({ error: '管理员必须指定交易员用户名' }), { status: 400 });
             }
         } else {
-            targetUser = username; // fallback
+            targetUser = username;
         }
 
-        // 插入数据库
         const { success } = await db.prepare(
             `INSERT INTO trades 
             (username, date, symbol, direction, stop_loss, open_price, volume, close_price, 
@@ -81,12 +80,12 @@ export async function onRequest(context) {
                 headers: { 'Content-Type': 'application/json' }
             });
         } else {
-            return new Response(JSON.stringify({ error: '插入失败，请检查字段' }), { status: 500 });
+            return new Response(JSON.stringify({ error: '插入失败' }), { status: 500 });
         }
     }
 
-    // ========== POST 批量导入 ==========
-    if (request.method === 'POST' && request.url.endsWith('/batch')) {
+    // ===== POST 批量导入 =====
+    if (request.method === 'POST' && pathname.endsWith('/batch')) {
         const trades = await request.json();
         if (!Array.isArray(trades) || trades.length === 0) {
             return new Response(JSON.stringify({ error: '请提供交易数组' }), { status: 400 });
@@ -98,9 +97,7 @@ export async function onRequest(context) {
             if (role === 'trader') {
                 targetUser = username;
             } else if (role === 'admin') {
-                if (!targetUser) {
-                    continue; // 跳过未指定用户的记录
-                }
+                if (!targetUser) continue;
             } else {
                 targetUser = username;
             }
@@ -134,37 +131,103 @@ export async function onRequest(context) {
         });
     }
 
-    // ========== DELETE 清空 ==========
-    if (request.method === 'DELETE') {
-        const url = new URL(request.url);
-        const targetUser = url.searchParams.get('user');
-
-        // 权限检查
-        if (role === 'trader') {
-            // 交易员只能删除自己的记录（单条删除应由 DELETE /trades/:id 处理，这里清空只允许管理员）
-            return new Response(JSON.stringify({ error: '无权清空' }), { status: 403 });
+    // ===== PUT 更新单条 =====
+    if (request.method === 'PUT') {
+        // URL格式: /api/trades/123
+        const id = pathname.split('/').pop();
+        if (!id || isNaN(id)) {
+            return new Response(JSON.stringify({ error: '无效的 ID' }), { status: 400 });
         }
 
-        // 管理员
-        let query = 'DELETE FROM trades';
-        const params = [];
-        if (targetUser) {
-            query += ' WHERE username = ?';
-            params.push(targetUser);
+        // 检查权限：只能修改自己的（管理员可改所有）
+        const checkQuery = 'SELECT username FROM trades WHERE id = ?';
+        const checkResult = await db.prepare(checkQuery).bind(id).first();
+        if (!checkResult) {
+            return new Response(JSON.stringify({ error: '记录不存在' }), { status: 404 });
         }
-        // 如果 targetUser 为空，则删除所有交易（谨慎）
-        const result = await db.prepare(query).bind(...params).run();
+        if (role === 'trader' && checkResult.username !== username) {
+            return new Response(JSON.stringify({ error: '无权修改' }), { status: 403 });
+        }
+
+        const tradeData = await request.json();
+        // 如果管理员传了 username，可修改归属，但这里简化，不允许更改归属
+        const result = await db.prepare(
+            `UPDATE trades SET 
+            date = ?, symbol = ?, direction = ?, stop_loss = ?, open_price = ?, volume = ?,
+            close_price = ?, profit = ?, profit_points = ?, open_fee = ?, close_fee = ?,
+            point_value = ?, tick_size = ?
+            WHERE id = ?`
+        ).bind(
+            tradeData.date,
+            tradeData.symbol,
+            tradeData.direction,
+            tradeData.stop_loss || null,
+            tradeData.open_price,
+            tradeData.volume,
+            tradeData.close_price || null,
+            tradeData.profit || 0,
+            tradeData.profit_points || 0,
+            tradeData.open_fee || 0,
+            tradeData.close_fee || 0,
+            tradeData.point_value || 0,
+            tradeData.tick_size || 0,
+            id
+        ).run();
+
         if (result.success) {
-            return new Response(JSON.stringify({ success: true, deleted: result.meta?.rows_written || 0 }), {
+            const { results } = await db.prepare('SELECT * FROM trades WHERE id = ?').bind(id).all();
+            return new Response(JSON.stringify(results[0]), {
                 headers: { 'Content-Type': 'application/json' }
             });
         } else {
-            return new Response(JSON.stringify({ error: '清空失败' }), { status: 500 });
+            return new Response(JSON.stringify({ error: '更新失败' }), { status: 500 });
         }
     }
 
-    // ========== PUT 更新（略，可保留原逻辑） ==========
-    // 为了节省篇幅，这里暂不实现 PUT，您可根据需要补充。
+    // ===== DELETE 单条或清空 =====
+    if (request.method === 'DELETE') {
+        // 如果 URL 包含 id，则删除单条，否则清空
+        const id = pathname.split('/').pop();
+        if (id && !isNaN(id)) {
+            // 删除单条
+            const checkQuery = 'SELECT username FROM trades WHERE id = ?';
+            const checkResult = await db.prepare(checkQuery).bind(id).first();
+            if (!checkResult) {
+                return new Response(JSON.stringify({ error: '记录不存在' }), { status: 404 });
+            }
+            if (role === 'trader' && checkResult.username !== username) {
+                return new Response(JSON.stringify({ error: '无权删除' }), { status: 403 });
+            }
+            const result = await db.prepare('DELETE FROM trades WHERE id = ?').bind(id).run();
+            if (result.success) {
+                return new Response(JSON.stringify({ success: true }), {
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            } else {
+                return new Response(JSON.stringify({ error: '删除失败' }), { status: 500 });
+            }
+        } else {
+            // 清空（仅管理员）
+            if (role !== 'admin') {
+                return new Response(JSON.stringify({ error: '权限不足' }), { status: 403 });
+            }
+            const targetUser = url.searchParams.get('user');
+            let query = 'DELETE FROM trades';
+            const params = [];
+            if (targetUser) {
+                query += ' WHERE username = ?';
+                params.push(targetUser);
+            }
+            const result = await db.prepare(query).bind(...params).run();
+            if (result.success) {
+                return new Response(JSON.stringify({ success: true, deleted: result.meta?.rows_written || 0 }), {
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            } else {
+                return new Response(JSON.stringify({ error: '清空失败' }), { status: 500 });
+            }
+        }
+    }
 
     return new Response(JSON.stringify({ error: 'Method Not Allowed' }), { status: 405 });
 }

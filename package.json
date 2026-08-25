@@ -1,0 +1,9 @@
+{
+  "name": "trading-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@tsndr/cloudflare-worker-jwt": "^2.5.3"
+  }
+}

@@ -750,40 +750,45 @@
         }
 
         async function importSymbolsFile() {
-            const fileInput = document.getElementById('importSymbolFile');
-            if (!fileInput.files || fileInput.files.length === 0) { alert('请选择文件'); return; }
-            const file = fileInput.files[0];
-            const reader = new FileReader();
-            reader.onload = async function(e) {
-                try {
-                    const data = new Uint8Array(e.target.result);
-                    const workbook = XLSX.read(data, { type: 'array' });
-                    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-                    const rows = XLSX.utils.sheet_to_json(sheet);
-                    if (rows.length === 0) { alert('文件为空'); return; }
-                    const items = [];
-                    rows.forEach(row => {
-                        const symbol = row['交易品种'] || row['symbol'] || '';
-                        const point_value = parseFloat(row['点值'] || row['pointValue'] || 0);
-                        const tick_size = parseFloat(row['最小跳动点数'] || row['tickSize'] || 0);
-                        const open_fee_rate = parseFloat(row['开仓手续费率'] || row['openFeeRate'] || 0);
-                        const close_fee_rate = parseFloat(row['平仓手续费率'] || row['closeFeeRate'] || 0);
-                        if (symbol && !isNaN(point_value) && !isNaN(tick_size) && !isNaN(open_fee_rate) && !isNaN(close_fee_rate)) {
-                            items.push({ symbol, point_value, tick_size, open_fee_rate, close_fee_rate });
-                        }
-                    });
-                    if (items.length === 0) { alert('没有有效数据'); return; }
-                    const result = await apiRequest('/symbols/batch', { method: 'POST', body: JSON.stringify(items) });
-                    alert(`成功导入 ${result.inserted} 个品种`);
-                    closeModal();
-                    renderPage(currentPage);
-                } catch (err) {
-                    alert('导入失败：' + err.message);
+    const fileInput = document.getElementById('importSymbolFile');
+    if (!fileInput.files || fileInput.files.length === 0) { alert('请选择文件'); return; }
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(sheet);
+            if (rows.length === 0) { alert('文件为空'); return; }
+            const items = [];
+            rows.forEach(row => {
+                const symbol = row['交易品种'] || row['symbol'] || '';
+                const point_value = parseFloat(row['点值'] || row['pointValue'] || 0);
+                const tick_size = parseFloat(row['最小跳动点数'] || row['tickSize'] || 0);
+                const open_fee_rate = parseFloat(row['开仓手续费率'] || row['openFeeRate'] || 0);
+                const close_fee_rate = parseFloat(row['平仓手续费率'] || row['closeFeeRate'] || 0);
+                if (symbol && !isNaN(point_value) && !isNaN(tick_size) && !isNaN(open_fee_rate) && !isNaN(close_fee_rate)) {
+                    items.push({ symbol, point_value, tick_size, open_fee_rate, close_fee_rate });
                 }
-            };
-            reader.readAsArrayBuffer(file);
+            });
+            if (items.length === 0) { alert('没有有效数据，请检查表头是否匹配：交易品种,点值,最小跳动点数,开仓手续费率,平仓手续费率'); return; }
+            const result = await apiRequest('/symbols/batch', { method: 'POST', body: JSON.stringify(items) });
+            // 显示详细结果
+            let msg = `成功导入 ${result.inserted} 个品种`;
+            if (result.errors && result.errors.length > 0) {
+                msg += `\n以下品种导入失败：\n${result.errors.join('\n')}`;
+            }
+            alert(msg);
+            closeModal();
+            renderPage(currentPage);
+        } catch (err) {
+            alert('导入失败：' + err.message);
+            console.error(err);
         }
-
+    };
+    reader.readAsArrayBuffer(file);
+}
         // ---- 品种编辑（占位） ----
         function editSymbol(symbol) {
             alert('编辑功能暂未实现，可删除后重新添加');

@@ -452,7 +452,7 @@
         }
 
         // ======================================================================
-        //  绘制图表函数（盈利红，亏损绿）
+        //  绘制图表函数（盈利红，亏损绿，周净值增强）
         // ======================================================================
         function drawCharts(data) {
             function getBarColors(arr, pos = '#ff6b6b', neg = '#4ecdc4') {
@@ -516,17 +516,31 @@
                 } catch (e) { console.warn('日盈亏图表绘制失败:', e); }
             }
 
-            // 周净值
+            // 周净值（增强健壮性）
             const weeklyCtx = document.getElementById('weeklyChart');
             if (weeklyCtx && data.weekly) {
                 try {
+                    // 确保有标签和数据，若为空则使用默认
+                    let labels = data.weekly.labels || ['初始'];
+                    let values = data.weekly.data || [1.0];
+                    // 如果数据长度小于2，补充到至少2个点（显示水平线）
+                    if (values.length < 2) {
+                        // 若只有一个点，复制一个
+                        if (values.length === 1) {
+                            values.push(values[0]);
+                            labels.push('当前');
+                        } else {
+                            values = [1.0, 1.0];
+                            labels = ['初始', '当前'];
+                        }
+                    }
                     new Chart(weeklyCtx, {
                         type: 'line',
                         data: {
-                            labels: data.weekly.labels || ['初始'],
+                            labels: labels,
                             datasets: [{
                                 label: '净值倍数',
-                                data: data.weekly.data || [1.0],
+                                data: values,
                                 borderColor: '#4ecdc4',
                                 backgroundColor: '#4ecdc422',
                                 fill: true,
@@ -538,7 +552,11 @@
                             maintainAspectRatio: false,
                             plugins: { legend: { display: false } },
                             scales: {
-                                y: { ticks: { color: '#8a9aa8' }, grid: { color: '#2a3a4a' } },
+                                y: {
+                                    ticks: { color: '#8a9aa8' },
+                                    grid: { color: '#2a3a4a' },
+                                    min: 0.5, // 自动调整最小值，避免从0开始
+                                },
                                 x: { ticks: { color: '#8a9aa8', maxTicksLimit: 20 } }
                             }
                         }
@@ -1081,6 +1099,7 @@
             }
         }
 
+        // ---- 新增用户（不再要求初始资金，默认为0） ----
         function openAddUser() {
             const modal = document.getElementById('modalOverlay');
             const box = document.getElementById('modalBox');
@@ -1093,27 +1112,19 @@
                     <option value="trader">交易员</option>
                     <option value="admin">管理员</option>
                 </select>
-                <div id="capitalInputGroup">
-                    <label>初始资金（仅交易员）</label>
-                    <input id="mNewCapital" type="number" step="any" value="50000">
-                </div>
                 <div class="btn-row">
                     <button class="btn btn-cancel" onclick="closeModal()">取消</button>
                     <button class="btn btn-confirm" onclick="saveNewUser()">添加</button>
                 </div>
             `;
             modal.classList.add('open');
-            document.getElementById('capitalInputGroup').style.display = 'block';
-            document.getElementById('mNewRole').onchange = function() {
-                document.getElementById('capitalInputGroup').style.display = (this.value === 'trader') ? 'block' : 'none';
-            };
         }
 
         async function saveNewUser() {
             const username = document.getElementById('mNewUser').value.trim();
             const password = document.getElementById('mNewPass').value.trim();
             const role = document.getElementById('mNewRole').value;
-            const initial_capital = role === 'trader' ? parseFloat(document.getElementById('mNewCapital').value) || 50000 : 0;
+            const initial_capital = 0; // 默认资金为0，后续在数据维护中修改
             if (!username || !password) { alert('请填写完整'); return; }
             try {
                 await apiRequest('/users', { method: 'POST', body: JSON.stringify({ username, password, role, initial_capital }) });

@@ -27,8 +27,8 @@ export async function onRequest(context) {
         if (!username || !password) {
             return new Response(JSON.stringify({ error: '用户名和密码必填' }), { status: 400 });
         }
-        // 检查是否已存在
-        const exist = await db.prepare('SELECT username FROM users WHERE username = ?').bind(username).first();
+        // 检查是否存在（不区分大小写）
+        const exist = await db.prepare('SELECT username FROM users WHERE LOWER(username) = LOWER(?)').bind(username).first();
         if (exist) return new Response(JSON.stringify({ error: '用户名已存在' }), { status: 400 });
         const cap = role === 'trader' ? (initial_capital || 0) : 0;
         const result = await db.prepare(

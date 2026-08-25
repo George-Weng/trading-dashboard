@@ -1,5 +1,44 @@
 import { verifyJWT } from '../../_utils';
 
+// ---- 计算盈亏的工具函数 ----
+async function calculateTrade(db, tradeData) {
+    // 从 symbols 表获取品种配置
+    const symbolConfig = await db.prepare('SELECT * FROM symbols WHERE symbol = ?').bind(tradeData.symbol).first();
+    if (!symbolConfig) {
+        // 如果找不到品种，无法计算，返回原数据（或抛出错误）
+        return { ...tradeData, profit: 0, profit_points: 0, open_fee: 0, close_fee: 0, point_value: 0, tick_size: 0 };
+    }
+    const { point_value, tick_size, open_fee_rate, close_fee_rate } = symbolConfig;
+    const openPrice = tradeData.open_price;
+    const closePrice = tradeData.close_price;
+    const volume = tradeData.volume;
+    const direction = tradeData.direction;
+
+    // 计算开平仓手续费
+    const openFee = openPrice * volume * open_fee_rate;
+    const closeFee = closePrice ? closePrice * volume * close_fee_rate : 0;
+
+    let profitPoints = 0;
+    if (closePrice !== null && closePrice !== undefined) {
+        if (direction === '买入') {
+            profitPoints = (closePrice - openPrice) / tick_size * volume;
+        } else if (direction === '卖出') {
+            profitPoints = (openPrice - closePrice) / tick_size * volume;
+        }
+    }
+    const profit = profitPoints * point_value * volume - openFee - closeFee;
+
+    return {
+        ...tradeData,
+        profit: parseFloat(profit.toFixed(2)),
+        profit_points: parseFloat(profitPoints.toFixed(2)),
+        open_fee: parseFloat(openFee.toFixed(2)),
+        close_fee: parseFloat(closeFee.toFixed(2)),
+        point_value,
+        tick_size,
+    };
+}
+
 export async function onRequest(context) {
     const { request, env } = context;
     const db = env.DB;
@@ -32,7 +71,7 @@ export async function onRequest(context) {
     }
 
     // ===== POST 新增（单条） =====
-    if (request.method === 'POST') {
+    if (request.method === 'POST' && !pathname.endsWith('/calculate-all')) {
         const tradeData = await request.json();
         let targetUser = tradeData.username;
         if (role === 'trader') targetUser = username;
@@ -40,32 +79,8 @@ export async function onRequest(context) {
             return new Response(JSON.stringify({ error: '管理员必须指定交易员用户名' }), { status: 400 });
         } else if (!targetUser) targetUser = username;
 
-        // 获取品种配置
-        const symbolConfig = await db.prepare('SELECT point_value, tick_size, open_fee_rate, close_fee_rate FROM symbols WHERE symbol = ?').bind(tradeData.symbol).first();
-        if (!symbolConfig) {
-            return new Response(JSON.stringify({ error: '品种不存在，请先在数据维护中添加' }), { status: 400 });
-        }
-
-        const { point_value, tick_size, open_fee_rate, close_fee_rate } = symbolConfig;
-        let profit = 0;
-        let profit_points = 0;
-        let open_fee = 0;
-        let close_fee = 0;
-        const closePrice = tradeData.close_price || null;
-
-        if (closePrice !== null && !isNaN(closePrice)) {
-            // 计算盈亏点数
-            if (tradeData.direction === '买入') {
-                profit_points = (closePrice - tradeData.open_price) / tick_size * tradeData.volume;
-            } else if (tradeData.direction === '卖出') {
-                profit_points = (tradeData.open_price - closePrice) / tick_size * tradeData.volume;
-            }
-            // 计算手续费（注意：这里简单计算，实际可能更复杂，但沿用原逻辑）
-            open_fee = tradeData.open_price * tradeData.volume * open_fee_rate;
-            close_fee = closePrice * tradeData.volume * close_fee_rate;
-            // 计算盈亏金额
-            profit = profit_points * point_value * tradeData.volume - open_fee - close_fee;
-        }
+        // 计算盈亏
+        const calculated = await calculateTrade(db, { ...tradeData, username: targetUser });
 
         const { success } = await db.prepare(
             `INSERT INTO trades 
@@ -73,28 +88,59 @@ export async function onRequest(context) {
              profit, profit_points, open_fee, close_fee, point_value, tick_size)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
-            targetUser,
-            tradeData.date,
-            tradeData.symbol,
-            tradeData.direction,
-            tradeData.stop_loss || null,
-            tradeData.open_price,
-            tradeData.volume,
-            closePrice,
-            profit,
-            profit_points,
-            open_fee,
-            close_fee,
-            point_value,
-            tick_size
+            calculated.username,
+            calculated.date,
+            calculated.symbol,
+            calculated.direction,
+            calculated.stop_loss || null,
+            calculated.open_price,
+            calculated.volume,
+            calculated.close_price || null,
+            calculated.profit,
+            calculated.profit_points,
+            calculated.open_fee,
+            calculated.close_fee,
+            calculated.point_value,
+            calculated.tick_size
         ).run();
-
         if (success) {
             const { results } = await db.prepare('SELECT * FROM trades ORDER BY id DESC LIMIT 1').all();
             return new Response(JSON.stringify(results[0]), { headers: { 'Content-Type': 'application/json' } });
         } else {
             return new Response(JSON.stringify({ error: '插入失败' }), { status: 500 });
         }
+    }
+
+    // ===== POST 批量计算所有交易（管理员专用） =====
+    if (request.method === 'POST' && pathname.endsWith('/calculate-all')) {
+        if (role !== 'admin') {
+            return new Response(JSON.stringify({ error: '需要管理员权限' }), { status: 403 });
+        }
+        // 获取所有交易
+        const { results: allTrades } = await db.prepare('SELECT * FROM trades').all();
+        let updated = 0;
+        for (const trade of allTrades) {
+            const calculated = await calculateTrade(db, trade);
+            // 更新
+            const result = await db.prepare(
+                `UPDATE trades SET 
+                profit = ?, profit_points = ?, open_fee = ?, close_fee = ?,
+                point_value = ?, tick_size = ?
+                WHERE id = ?`
+            ).bind(
+                calculated.profit,
+                calculated.profit_points,
+                calculated.open_fee,
+                calculated.close_fee,
+                calculated.point_value,
+                calculated.tick_size,
+                trade.id
+            ).run();
+            if (result.success) updated++;
+        }
+        return new Response(JSON.stringify({ success: true, updated }), {
+            headers: { 'Content-Type': 'application/json' }
+        });
     }
 
     // ===== DELETE 清空 =====

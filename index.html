@@ -585,13 +585,11 @@
                 if (trades.length === 0) {
                     html += `<div class="empty-msg">暂无交易记录</div>`;
                 } else {
-                    // 按 id 降序（最新添加在前）
-                    const sorted = trades.sort((a, b) => b.id - a.id);
+                    // 后端已按 date DESC, id DESC 排序，无需前端排序
                     html += `<div class="scroll-wrap"><table><thead><tr>`;
                     if (viewingUser === 'all') html += `<th>交易员</th>`;
                     html += `<th>日期</th><th>品种</th><th>方向</th><th>止损</th><th>开仓价</th><th>手数</th><th>平仓价</th><th>盈亏</th><th>1:1止盈</th><th>1:2止盈</th><th>操作</th></tr></thead><tbody>`;
-                    sorted.forEach(t => {
-                        // 利润显示：为 null 或 undefined 时显示“—”
+                    trades.forEach(t => {
                         let profitDisplay = '—';
                         if (t.profit !== null && t.profit !== undefined) {
                             profitDisplay = (t.profit >= 0 ? '+' : '') + formatCurrency(t.profit);
@@ -617,6 +615,39 @@
             } catch (e) {
                 area.innerHTML = `<div class="empty-msg">加载交易记录失败：${e.message}</div>`;
             }
+        }
+
+        // ---- 导出 Excel 功能 ----
+        function exportExcel() {
+            const url = '/trades' + (viewingUser !== 'all' ? `?user=${viewingUser}` : '');
+            apiRequest(url).then(trades => {
+                if (!trades || trades.length === 0) {
+                    alert('没有数据可导出');
+                    return;
+                }
+                const exportData = trades.map(t => ({
+                    '交易员': t.username,
+                    '日期': t.date,
+                    '品种': t.symbol,
+                    '方向': t.direction,
+                    '止损': t.stop_loss,
+                    '开仓价': t.open_price,
+                    '手数': t.volume,
+                    '平仓价': t.close_price || '',
+                    '盈亏': t.profit !== null ? t.profit : '',
+                    '1:1止盈': t.tp1 ? t.tp1.toFixed(2) : '',
+                    '1:2止盈': t.tp2 ? t.tp2.toFixed(2) : '',
+                    '开仓费': t.open_fee,
+                    '平仓费': t.close_fee,
+                }));
+                const wb = XLSX.utils.book_new();
+                const ws = XLSX.utils.json_to_sheet(exportData);
+                XLSX.utils.book_append_sheet(wb, ws, '交易记录');
+                const fileName = `交易记录_${new Date().toISOString().slice(0,10)}.xlsx`;
+                XLSX.writeFile(wb, fileName);
+            }).catch(err => {
+                alert('导出失败：' + err.message);
+            });
         }
 
         // ---- 新增/编辑交易 ----
@@ -882,8 +913,6 @@
                 };
             }).catch(err => alert('获取用户列表失败：' + err.message));
         }
-
-        function exportExcel() { alert('导出功能暂未实现'); }
 
         // ======================================================================
         //  数据维护（含批量导入品种）
@@ -1183,7 +1212,7 @@
             }
         }
 
-        // ---- 当前用户修改密码 ----
+        // ---- 当前用户修改密码（交易员和管理员均适用） ----
         function openChangePwd() {
             const modal = document.getElementById('modalOverlay');
             const box = document.getElementById('modalBox');
@@ -1202,29 +1231,29 @@
         }
 
         async function saveChangePwd() {
-    const oldPwd = document.getElementById('mOldPwd').value.trim();
-    const newPwd = document.getElementById('mNewPwdSelf').value.trim();
-    const newPwd2 = document.getElementById('mNewPwdSelf2').value.trim();
-    if (!oldPwd || !newPwd || !newPwd2) { alert('请完整填写所有字段'); return; }
-    if (newPwd !== newPwd2) { alert('两次输入的新密码不一致'); return; }
+            const oldPwd = document.getElementById('mOldPwd').value.trim();
+            const newPwd = document.getElementById('mNewPwdSelf').value.trim();
+            const newPwd2 = document.getElementById('mNewPwdSelf2').value.trim();
+            if (!oldPwd || !newPwd || !newPwd2) { alert('请完整填写所有字段'); return; }
+            if (newPwd !== newPwd2) { alert('两次输入的新密码不一致'); return; }
 
-    try {
-        // 1. 验证旧密码（调用登录接口）
-        await apiRequest('/auth', {
-            method: 'POST',
-            body: JSON.stringify({ username: currentUser.username, password: oldPwd })
-        });
-        // 2. 修改密码
-        await apiRequest(`/users/${currentUser.username}`, {
-            method: 'PUT',
-            body: JSON.stringify({ password: newPwd })
-        });
-        alert('密码修改成功，请重新登录');
-        doLogout();
-    } catch (e) {
-        alert('修改失败：' + (e.message || '旧密码错误或网络问题'));
-    }
-}
+            try {
+                // 1. 验证旧密码
+                await apiRequest('/auth', {
+                    method: 'POST',
+                    body: JSON.stringify({ username: currentUser.username, password: oldPwd })
+                });
+                // 2. 修改密码
+                await apiRequest(`/users/${currentUser.username}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ password: newPwd })
+                });
+                alert('密码修改成功，请重新登录');
+                doLogout();
+            } catch (e) {
+                alert('修改失败：' + (e.message || '旧密码错误或网络问题'));
+            }
+        }
 
         // ======================================================================
         //  模态框工具

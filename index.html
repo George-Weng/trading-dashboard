@@ -520,12 +520,9 @@
             const weeklyCtx = document.getElementById('weeklyChart');
             if (weeklyCtx && data.weekly) {
                 try {
-                    // 确保有标签和数据，若为空则使用默认
                     let labels = data.weekly.labels || ['初始'];
                     let values = data.weekly.data || [1.0];
-                    // 如果数据长度小于2，补充到至少2个点（显示水平线）
                     if (values.length < 2) {
-                        // 若只有一个点，复制一个
                         if (values.length === 1) {
                             values.push(values[0]);
                             labels.push('当前');
@@ -555,7 +552,7 @@
                                 y: {
                                     ticks: { color: '#8a9aa8' },
                                     grid: { color: '#2a3a4a' },
-                                    min: 0.5, // 自动调整最小值，避免从0开始
+                                    min: 0.5,
                                 },
                                 x: { ticks: { color: '#8a9aa8', maxTicksLimit: 20 } }
                             }
@@ -588,18 +585,26 @@
                 if (trades.length === 0) {
                     html += `<div class="empty-msg">暂无交易记录</div>`;
                 } else {
-                    const sorted = trades.sort((a, b) => (a.date < b.date ? 1 : -1));
+                    // 按 id 降序（最新添加在前）
+                    const sorted = trades.sort((a, b) => b.id - a.id);
                     html += `<div class="scroll-wrap"><table><thead><tr>`;
                     if (viewingUser === 'all') html += `<th>交易员</th>`;
-                    html += `<th>日期</th><th>品种</th><th>方向</th><th>止损</th><th>开仓价</th><th>手数</th><th>平仓价</th><th>盈亏</th><th>操作</th></tr></thead><tbody>`;
+                    html += `<th>日期</th><th>品种</th><th>方向</th><th>止损</th><th>开仓价</th><th>手数</th><th>平仓价</th><th>盈亏</th><th>1:1止盈</th><th>1:2止盈</th><th>操作</th></tr></thead><tbody>`;
                     sorted.forEach(t => {
-                        const color = t.profit >= 0 ? 'var(--red-loss)' : 'var(--green-profit)';
+                        // 利润显示：为 null 或 undefined 时显示“—”
+                        let profitDisplay = '—';
+                        if (t.profit !== null && t.profit !== undefined) {
+                            profitDisplay = (t.profit >= 0 ? '+' : '') + formatCurrency(t.profit);
+                        }
+                        const color = (t.profit !== null && t.profit >= 0) ? 'var(--red-loss)' : 'var(--green-profit)';
                         html += `<tr>`;
                         if (viewingUser === 'all') html += `<td>${t.username}</td>`;
                         html += `<td>${t.date}</td><td>${t.symbol}</td><td>${t.direction}</td>
                                 <td>${t.stop_loss}</td><td>${t.open_price}</td><td>${t.volume}</td>
                                 <td>${t.close_price || '—'}</td>
-                                <td style="color:${color};">${t.profit>=0?'+':''}${formatCurrency(t.profit)}</td>
+                                <td style="color:${color};">${profitDisplay}</td>
+                                <td>${t.tp1 ? t.tp1.toFixed(2) : '—'}</td>
+                                <td>${t.tp2 ? t.tp2.toFixed(2) : '—'}</td>
                                 <td>
                                     <button class="btn" style="padding:2px 10px;font-size:12px;color:var(--gold);" onclick="editTrade(${t.id})">✎</button>
                                     <button class="btn" style="padding:2px 10px;font-size:12px;color:var(--red-loss);" onclick="deleteTrade(${t.id})">✕</button>
@@ -1124,7 +1129,7 @@
             const username = document.getElementById('mNewUser').value.trim();
             const password = document.getElementById('mNewPass').value.trim();
             const role = document.getElementById('mNewRole').value;
-            const initial_capital = 0; // 默认资金为0，后续在数据维护中修改
+            const initial_capital = 0;
             if (!username || !password) { alert('请填写完整'); return; }
             try {
                 await apiRequest('/users', { method: 'POST', body: JSON.stringify({ username, password, role, initial_capital }) });

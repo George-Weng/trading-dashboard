@@ -10,3 +10,64 @@ export async function verifyJWT(token, secret) {
         return null;
     }
 }
+
+// 公共计算函数（含止盈位计算）
+export async function calculateTrade(db, tradeData) {
+    const config = await db.prepare('SELECT * FROM symbols WHERE symbol = ?').bind(tradeData.symbol).first();
+    if (!config) {
+        return {
+            ...tradeData,
+            profit: null,
+            profit_points: null,
+            open_fee: 0,
+            close_fee: 0,
+            point_value: 0,
+            tick_size: 0,
+            tp1: null,
+            tp2: null
+        };
+    }
+    const { point_value, tick_size, open_fee_rate, close_fee_rate } = config;
+    const openPrice = tradeData.open_price;
+    const closePrice = tradeData.close_price;
+    const volume = tradeData.volume;
+    const direction = tradeData.direction;
+    const stopLoss = tradeData.stop_loss;
+
+    const openFee = openPrice * volume * open_fee_rate;
+    const closeFee = closePrice ? closePrice * volume * close_fee_rate : 0;
+
+    let profitPoints = null;
+    let profit = null;
+    if (closePrice !== null && closePrice !== undefined) {
+        if (direction === '买入') {
+            profitPoints = (closePrice - openPrice) / tick_size * volume;
+        } else {
+            profitPoints = (openPrice - closePrice) / tick_size * volume;
+        }
+        profit = profitPoints * point_value * volume - openFee - closeFee;
+    }
+
+    // 1:1 和 1:2 止盈价位
+    let tp1 = null, tp2 = null;
+    if (stopLoss !== null && stopLoss !== undefined) {
+        const baseDiff = openPrice - stopLoss;
+        const adjust = direction === '买入' ? -tick_size : tick_size;
+        const diff1 = baseDiff + adjust;
+        const diff2 = diff1 * 2;
+        tp1 = openPrice + diff1;
+        tp2 = openPrice + diff2;
+    }
+
+    return {
+        ...tradeData,
+        profit: profit !== null ? parseFloat(profit.toFixed(2)) : null,
+        profit_points: profitPoints !== null ? parseFloat(profitPoints.toFixed(2)) : null,
+        open_fee: parseFloat(openFee.toFixed(2)),
+        close_fee: parseFloat(closeFee.toFixed(2)),
+        point_value,
+        tick_size,
+        tp1: tp1 !== null ? parseFloat(tp1.toFixed(6)) : null,
+        tp2: tp2 !== null ? parseFloat(tp2.toFixed(6)) : null,
+    };
+}

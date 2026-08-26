@@ -25,7 +25,7 @@ export async function onRequest(context) {
             query += ' WHERE username = ?';
             params.push(targetUser);
         }
-        query += ' ORDER BY id DESC';  // 最新添加在前
+        query += ' ORDER BY date DESC, id DESC';  // 最新添加在前
         const { results } = await db.prepare(query).bind(...params).all();
         return new Response(JSON.stringify(results), { headers: { 'Content-Type': 'application/json' } });
     }

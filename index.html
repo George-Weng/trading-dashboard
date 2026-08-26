@@ -1231,29 +1231,32 @@
         }
 
         async function saveChangePwd() {
-            const oldPwd = document.getElementById('mOldPwd').value.trim();
-            const newPwd = document.getElementById('mNewPwdSelf').value.trim();
-            const newPwd2 = document.getElementById('mNewPwdSelf2').value.trim();
-            if (!oldPwd || !newPwd || !newPwd2) { alert('请完整填写所有字段'); return; }
-            if (newPwd !== newPwd2) { alert('两次输入的新密码不一致'); return; }
+    const oldPwd = document.getElementById('mOldPwd').value.trim();
+    const newPwd = document.getElementById('mNewPwdSelf').value.trim();
+    const newPwd2 = document.getElementById('mNewPwdSelf2').value.trim();
+    if (!oldPwd || !newPwd || !newPwd2) { alert('请完整填写所有字段'); return; }
+    if (newPwd !== newPwd2) { alert('两次输入的新密码不一致'); return; }
 
-            try {
-                // 1. 验证旧密码
-                await apiRequest('/auth', {
-                    method: 'POST',
-                    body: JSON.stringify({ username: currentUser.username, password: oldPwd })
-                });
-                // 2. 修改密码
-                await apiRequest(`/users/${currentUser.username}`, {
-                    method: 'PUT',
-                    body: JSON.stringify({ password: newPwd })
-                });
-                alert('密码修改成功，请重新登录');
-                doLogout();
-            } catch (e) {
-                alert('修改失败：' + (e.message || '旧密码错误或网络问题'));
-            }
-        }
+    try {
+        // 1. 验证旧密码
+        await apiRequest('/auth', {
+            method: 'POST',
+            body: JSON.stringify({ username: currentUser.username, password: oldPwd })
+        });
+        // 2. 修改密码
+        await apiRequest(`/users/${currentUser.username}`, {
+            method: 'PUT',
+            body: JSON.stringify({ password: newPwd })
+        });
+        // 3. 关闭模态框
+        closeModal();
+        // 4. 提示成功并跳转到登录页
+        alert('密码修改成功，请重新登录');
+        doLogout();
+    } catch (e) {
+        alert('修改失败：' + (e.message || '旧密码错误或网络问题'));
+    }
+}
 
         // ======================================================================
         //  模态框工具

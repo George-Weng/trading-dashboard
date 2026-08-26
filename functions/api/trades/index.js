@@ -25,7 +25,8 @@ export async function onRequest(context) {
             query += ' WHERE username = ?';
             params.push(targetUser);
         }
-        query += ' ORDER BY date DESC, id DESC';  // 最新添加在前
+        // 按日期降序，同日期内按 id 降序（最新添加在前）
+        query += ' ORDER BY date DESC, id DESC';
         const { results } = await db.prepare(query).bind(...params).all();
         return new Response(JSON.stringify(results), { headers: { 'Content-Type': 'application/json' } });
     }
@@ -55,7 +56,7 @@ export async function onRequest(context) {
             calculated.tp1, calculated.tp2
         ).run();
         if (success) {
-            const { results } = await db.prepare('SELECT * FROM trades ORDER BY id DESC LIMIT 1').all();
+            const { results } = await db.prepare('SELECT * FROM trades ORDER BY date DESC, id DESC LIMIT 1').all();
             return new Response(JSON.stringify(results[0]), { headers: { 'Content-Type': 'application/json' } });
         } else {
             return new Response(JSON.stringify({ error: '插入失败' }), { status: 500 });

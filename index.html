@@ -404,6 +404,13 @@
 
         const label = viewingUser === 'all' ? '全部交易员' : viewingUser;
 
+        // ---- 标题区域（增加返回按钮） ----
+        let titleHtml = `<div class="page-title">📊 数据总览 <small>${label}</small>`;
+        if (currentUser.role === 'admin' && viewingUser !== 'all') {
+            titleHtml += ` <button class="btn" style="padding:4px 16px;font-size:13px;margin-left:12px;background:var(--gold);color:#0b0e14;border:none;border-radius:4px;cursor:pointer;" onclick="switchViewUser('all')">← 返回全部</button>`;
+        }
+        titleHtml += `</div>`;
+
         // 构建 KPI 卡片
         let kpiHtml = `
             <div class="kpi-grid">
@@ -424,7 +431,6 @@
                 const users = await apiRequest('/users');
                 const traders = users.filter(u => u.role === 'trader');
                 if (traders.length > 0) {
-                    // 并行获取每个交易员的统计
                     const statsPromises = traders.map(u => apiRequest(`/stats?user=${u.username}`));
                     const statsResults = await Promise.all(statsPromises);
 
@@ -467,7 +473,7 @@
 
         // 构建页面主体
         area.innerHTML = `
-            <div class="page-title">📊 数据总览 <small>${label}</small></div>
+            ${titleHtml}
             ${kpiHtml}
             ${traderCardsHtml}
             <div class="chart-main">

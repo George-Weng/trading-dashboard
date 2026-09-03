@@ -828,7 +828,7 @@
             modal.classList.add('open');
         }
 
-    async function importTradesFile(username) {
+async function importTradesFile(username) {
     const fileInput = document.getElementById('importFileInput');
     if (!fileInput.files || fileInput.files.length === 0) { alert('请选择文件'); return; }
     const file = fileInput.files[0];
@@ -836,94 +836,107 @@
     reader.onload = async function(e) {
         try {
             const data = new Uint8Array(e.target.result);
-            const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+            // 读取时保留原始格式，不自动转换日期
+            const workbook = XLSX.read(data, { type: 'array', cellDates: false });
             const sheet = workbook.Sheets[workbook.SheetNames[0]];
-            const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+            // 转为对象数组，保留所有值作为字符串
+            const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
             if (rows.length === 0) { alert('文件为空'); return; }
 
-            // 获取第一行的所有列名，并标准化（去除空格、转小写）
-            const firstRow = rows[0];
+            // 清洗列名（去除首尾空格、换行、制表符，统一转小写）
+            const rawKeys = Object.keys(rows[0]);
+            const cleanedKeys = rawKeys.map(k => k.trim().replace(/[\n\r\t]+/g, ' ').replace(/\s+/g, ' ').trim());
+            
+            // 建立映射：标准名 → 实际列名
+            const aliasMap = {
+                '日期': ['日期', 'date', '交易日期', '日', 'date', 'day'],
+                '品种': ['品种', '交易品种', 'symbol', '商品', '标的', 'symbols'],
+                '方向': ['方向', '交易方向', 'direction', '买卖', '类型', 'side'],
+                '止损': ['止损', '止损位', 'stoploss', 'stop_loss', 'stop', 'sl'],
+                '开仓价': ['开仓价', '开仓', 'openprice', 'open_price', 'open', 'op'],
+                '手数': ['手数', '开仓手数', 'volume', '数量', 'lot', 'lots'],
+                '平仓价': ['平仓价', '平仓', 'closeprice', 'close_price', 'close', 'cp']
+            };
+
             const colMap = {};
-            Object.keys(firstRow).forEach(key => {
-                const normalized = key.trim().toLowerCase();
-                // 常见别名映射
-                const aliasMap = {
-                    '日期': ['日期', 'date', '交易日期', '日'],
-                    '品种': ['品种', '交易品种', 'symbol', '商品', '标的'],
-                    '方向': ['方向', '交易方向', 'direction', '买卖', '类型'],
-                    '止损': ['止损', '止损位', 'stoploss', 'stop_loss', 'stop'],
-                    '开仓价': ['开仓价', '开仓', 'openprice', 'open_price', 'open'],
-                    '手数': ['手数', '开仓手数', 'volume', '数量'],
-                    '平仓价': ['平仓价', '平仓', 'closeprice', 'close_price', 'close']
-                };
-                // 查找映射
-                for (const [standard, aliases] of Object.entries(aliasMap)) {
-                    if (aliases.includes(normalized)) {
-                        colMap[standard] = key;
+            for (const [standard, aliases] of Object.entries(aliasMap)) {
+                const lowerAliases = aliases.map(a => a.toLowerCase());
+                for (let i = 0; i < cleanedKeys.length; i++) {
+                    const key = cleanedKeys[i];
+                    if (lowerAliases.includes(key)) {
+                        colMap[standard] = rawKeys[i]; // 保留原始列名用于取值
                         break;
                     }
                 }
-            });
+            }
 
-            // 检查必填列是否存在
+            // 检查必填列
             const required = ['日期', '品种', '方向', '止损', '开仓价', '手数'];
             const missing = required.filter(r => !colMap[r]);
             if (missing.length > 0) {
-                alert(`缺少必要列：${missing.join('、')}。请确保列名包含：日期、品种、方向、止损、开仓价、手数（平仓价可选）`);
+                const detected = cleanedKeys.join('、') || '（无）';
+                alert(`缺少必要列：${missing.join('、')}。\n检测到的列名：${detected}\n请将列名改为标准名称。`);
                 return;
             }
 
             const trades = [];
             rows.forEach(row => {
-                const dateRaw = row[colMap['日期']] || '';
-                if (!dateRaw) return;
+                const dateRaw = row[colMap['日期']];
+                if (dateRaw === undefined || dateRaw === '') return;
 
-                const symbol = (row[colMap['品种']] || '').toString().trim();
-                const direction = (row[colMap['方向']] || '').toString().trim();
-                const stop_loss = parseFloat(row[colMap['止损']]) || 0;
-                const open_price = parseFloat(row[colMap['开仓价']]) || 0;
-                const volume = parseFloat(row[colMap['手数']]) || 0;
-                const closePriceRaw = colMap['平仓价'] ? row[colMap['平仓价']] : '';
-                let close_price = (closePriceRaw !== undefined && closePriceRaw !== '') ? parseFloat(closePriceRaw) : null;
+                // 清洗字符串
+                const clean = (val) => (val !== undefined && val !== null) ? String(val).trim() : '';
+                const symbol = clean(row[colMap['品种']]);
+                const direction = clean(row[colMap['方向']]);
+                const stopLossRaw = clean(row[colMap['止损']]);
+                const openPriceRaw = clean(row[colMap['开仓价']]);
+                const volumeRaw = clean(row[colMap['手数']]);
+                const closePriceRaw = colMap['平仓价'] ? clean(row[colMap['平仓价']]) : '';
+
+                // 将字符串转数字（移除逗号等）
+                const toNumber = (str) => {
+                    if (str === '') return NaN;
+                    const cleaned = str.replace(/,/g, '').trim();
+                    return parseFloat(cleaned);
+                };
+
+                const stop_loss = toNumber(stopLossRaw);
+                const open_price = toNumber(openPriceRaw);
+                const volume = toNumber(volumeRaw);
+                let close_price = (closePriceRaw !== '') ? toNumber(closePriceRaw) : null;
 
                 if (!symbol || !direction || isNaN(stop_loss) || isNaN(open_price) || isNaN(volume) || volume <= 0) {
-                    console.warn('跳过无效行：', row);
+                    console.warn('跳过无效行（数值错误）：', row);
                     return;
                 }
                 if (close_price !== null && isNaN(close_price)) close_price = null;
 
-                // 日期格式化（确保 YYYY-MM-DD）
-                let dateStrFormatted = '';
-                if (typeof dateRaw === 'string') {
-                    const match = dateRaw.match(/^(\d{4}-\d{2}-\d{2})/);
-                    if (match) {
-                        dateStrFormatted = match[1];
-                    } else {
-                        const parsed = new Date(dateRaw);
-                        if (!isNaN(parsed)) {
-                            const y = parsed.getFullYear();
-                            const m = String(parsed.getMonth() + 1).padStart(2, '0');
-                            const d = String(parsed.getDate()).padStart(2, '0');
-                            dateStrFormatted = `${y}-${m}-${d}`;
-                        }
+                // 日期处理（支持多种格式）
+                let dateStr = '';
+                const dateStrRaw = String(dateRaw).trim();
+                // 尝试匹配 YYYY-MM-DD 或 YYYY/MM/DD
+                const match = dateStrRaw.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+                if (match) {
+                    let y = match[1], m = match[2].padStart(2, '0'), d = match[3].padStart(2, '0');
+                    dateStr = `${y}-${m}-${d}`;
+                } else {
+                    // 其他格式尝试用 Date 解析（本地时间）
+                    const parsed = new Date(dateStrRaw);
+                    if (!isNaN(parsed)) {
+                        const y = parsed.getFullYear();
+                        const m = String(parsed.getMonth() + 1).padStart(2, '0');
+                        const d = String(parsed.getDate()).padStart(2, '0');
+                        dateStr = `${y}-${m}-${d}`;
                     }
-                } else if (typeof dateRaw === 'number') {
-                    const excelEpoch = new Date(1899, 11, 30);
-                    const dateObj = new Date(excelEpoch.getTime() + dateRaw * 86400000);
-                    const y = dateObj.getFullYear();
-                    const m = String(dateObj.getMonth() + 1).padStart(2, '0');
-                    const d = String(dateObj.getDate()).padStart(2, '0');
-                    dateStrFormatted = `${y}-${m}-${d}`;
                 }
-
-                if (!dateStrFormatted) {
+                if (!dateStr) {
                     console.warn('日期解析失败：', dateRaw);
                     return;
                 }
 
                 trades.push({
                     username,
-                    date: dateStrFormatted,
+                    date: dateStr,
                     symbol,
                     direction,
                     stop_loss,
@@ -934,7 +947,7 @@
             });
 
             if (trades.length === 0) {
-                alert('没有有效数据可导入。请检查：\n1. 列名是否为：日期、品种、方向、止损、开仓价、手数、平仓价（可选）\n2. 数值列是否包含有效数字\n3. 日期格式是否为 YYYY-MM-DD');
+                alert('没有有效数据可导入。\n可能原因：\n1. 列名不匹配（检测到的列名已在上一步提示）\n2. 数值列含有非数字字符\n3. 日期格式无法识别\n请检查数据。');
                 return;
             }
 

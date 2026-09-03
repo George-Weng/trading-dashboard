@@ -566,56 +566,57 @@
         //  交易记录（含编辑、品种下拉、批量导入、清空）
         // ======================================================================
         async function renderTrades(area) {
-            try {
-                let url = '/trades';
-                if (viewingUser !== 'all') url += `?user=${viewingUser}`;
-                const trades = await apiRequest(url);
-                const isAdmin = currentUser.role === 'admin';
-                const label = viewingUser === 'all' ? '全部交易员' : viewingUser;
-                let html = `<div class="page-title">📈 交易记录 <small>${label}</small></div>`;
-                html += `<div class="toolbar">
-                            <button class="btn btn-primary" onclick="openAddTrade()">＋ 添加记录</button>
-                            <button class="btn btn-success" onclick="openImportTrades()">📥 批量导入</button>
-                            <button class="btn btn-success" onclick="exportExcel()">📤 导出 Excel</button>
-                            ${isAdmin ? (viewingUser === 'all' ? 
-                                `<button class="btn btn-danger" onclick="clearAllTrades()">🗑️ 清空所有交易</button>` :
-                                `<button class="btn btn-danger" onclick="clearUserTrades('${viewingUser}')">🗑️ 清空该用户交易</button>`) : ''}
-                            <span style="color:var(--text-secondary);font-size:13px;margin-left:auto;">共 ${trades.length} 条</span>
-                        </div>`;
-                if (trades.length === 0) {
-                    html += `<div class="empty-msg">暂无交易记录</div>`;
-                } else {
-                    // 后端已按 date DESC, id DESC 排序，无需前端排序
-                    html += `<div class="scroll-wrap"><table><thead><tr>`;
-                    if (viewingUser === 'all') html += `<th>交易员</th>`;
-                    html += `<th>日期</th><th>品种</th><th>方向</th><th>止损</th><th>开仓价</th><th>手数</th><th>平仓价</th><th>盈亏</th><th>1:1止盈</th><th>1:2止盈</th><th>操作</th></tr></thead><tbody>`;
-                    trades.forEach(t => {
-                        let profitDisplay = '—';
-                        if (t.profit !== null && t.profit !== undefined) {
-                            profitDisplay = (t.profit >= 0 ? '+' : '') + formatCurrency(t.profit);
-                        }
-                        const color = (t.profit !== null && t.profit >= 0) ? 'var(--red-loss)' : 'var(--green-profit)';
-                        html += `<tr>`;
-                        if (viewingUser === 'all') html += `<td>${t.username}</td>`;
-                        html += `<td>${t.date}</td><td>${t.symbol}</td><td>${t.direction}</td>
-                                <td>${t.stop_loss}</td><td>${t.open_price}</td><td>${t.volume}</td>
-                                <td>${t.close_price || '—'}</td>
-                                <td style="color:${color};">${profitDisplay}</td>
-                                <td>${t.tp1 ? t.tp1.toFixed(2) : '—'}</td>
-                                <td>${t.tp2 ? t.tp2.toFixed(2) : '—'}</td>
-                                <td>
-                                    <button class="btn" style="padding:2px 10px;font-size:12px;color:var(--gold);" onclick="editTrade(${t.id})">✎</button>
-                                    <button class="btn" style="padding:2px 10px;font-size:12px;color:var(--red-loss);" onclick="deleteTrade(${t.id})">✕</button>
-                                </td>`;
-                        html += `</tr>`;
-                    });
-                    html += `</tbody></table></div>`;
+    try {
+        let url = '/trades';
+        if (viewingUser !== 'all') url += `?user=${viewingUser}`;
+        const trades = await apiRequest(url);
+        const isAdmin = currentUser.role === 'admin';
+        const label = viewingUser === 'all' ? '全部交易员' : viewingUser;
+        let html = `<div class="page-title">📈 交易记录 <small>${label}</small></div>`;
+        html += `<div class="toolbar">
+                    <button class="btn btn-primary" onclick="openAddTrade()">＋ 添加记录</button>
+                    <button class="btn btn-success" onclick="openImportTrades()">📥 批量导入</button>
+                    <button class="btn btn-success" onclick="exportExcel()">📤 导出 Excel</button>
+                    ${isAdmin ? (viewingUser === 'all' ? 
+                        `<button class="btn btn-danger" onclick="clearAllTrades()">🗑️ 清空所有交易</button>` :
+                        `<button class="btn btn-danger" onclick="clearUserTrades('${viewingUser}')">🗑️ 清空该用户交易</button>`) : ''}
+                    <span style="color:var(--text-secondary);font-size:13px;margin-left:auto;">共 ${trades.length} 条</span>
+                </div>`;
+        if (trades.length === 0) {
+            html += `<div class="empty-msg">暂无交易记录</div>`;
+        } else {
+            html += `<div class="scroll-wrap"><table><thead><tr>`;
+            if (viewingUser === 'all') html += `<th>交易员</th>`;
+            html += `<th>日期</th><th>品种</th><th>方向</th><th>止损</th><th>开仓价</th><th>手数</th><th>平仓价</th><th>盈亏</th><th>1:1止盈</th><th>1:2止盈</th><th>操作</th></tr></thead><tbody>`;
+            trades.forEach(t => {
+                let profitDisplay = '—';
+                if (t.profit !== null && t.profit !== undefined) {
+                    profitDisplay = (t.profit >= 0 ? '+' : '') + formatCurrency(t.profit);
                 }
-                area.innerHTML = html;
-            } catch (e) {
-                area.innerHTML = `<div class="empty-msg">加载交易记录失败：${e.message}</div>`;
-            }
+                const color = (t.profit !== null && t.profit >= 0) ? 'var(--red-loss)' : 'var(--green-profit)';
+                // 日期只显示 YYYY-MM-DD
+                const dateDisplay = t.date ? t.date.slice(0, 10) : '';
+                html += `<tr>`;
+                if (viewingUser === 'all') html += `<td>${t.username}</td>`;
+                html += `<td>${dateDisplay}</td><td>${t.symbol}</td><td>${t.direction}</td>
+                        <td>${t.stop_loss}</td><td>${t.open_price}</td><td>${t.volume}</td>
+                        <td>${t.close_price || '—'}</td>
+                        <td style="color:${color};">${profitDisplay}</td>
+                        <td>${t.tp1 ? t.tp1.toFixed(2) : '—'}</td>
+                        <td>${t.tp2 ? t.tp2.toFixed(2) : '—'}</td>
+                        <td>
+                            <button class="btn" style="padding:2px 10px;font-size:12px;color:var(--gold);" onclick="editTrade(${t.id})">✎</button>
+                            <button class="btn" style="padding:2px 10px;font-size:12px;color:var(--red-loss);" onclick="deleteTrade(${t.id})">✕</button>
+                        </td>`;
+                html += `</tr>`;
+            });
+            html += `</tbody></table></div>`;
         }
+        area.innerHTML = html;
+    } catch (e) {
+        area.innerHTML = `<div class="empty-msg">加载交易记录失败：${e.message}</div>`;
+    }
+}
 
         // ---- 导出 Excel 功能 ----
         function exportExcel() {

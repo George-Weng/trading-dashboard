@@ -384,72 +384,129 @@
         //  主页 (含图表)
         // ======================================================================
         async function renderHome(area) {
+    try {
+        let url = '/stats';
+        if (viewingUser !== 'all') {
+            url += `?user=${viewingUser}`;
+        }
+        const stats = await apiRequest(url);
+        const kpi = stats.kpi || {};
+        const totalProfit = kpi.totalProfit || 0;
+        const totalFee = kpi.totalFee || 0;
+        const totalTrades = kpi.totalTrades || 0;
+        const winTrades = kpi.winTrades || 0;
+        const winRate = totalTrades > 0 ? (winTrades / totalTrades) * 100 : 0;
+        const totalCapital = kpi.totalCapital || 0;
+        const equity = totalCapital + totalProfit;
+        const profitRate = totalCapital > 0 ? (totalProfit / totalCapital) * 100 : 0;
+        const profitFactor = (totalTrades > 0 && kpi.totalLoss > 0) ? (kpi.totalWin / kpi.totalLoss).toFixed(2) : (kpi.totalWin > 0 ? '∞' : '0');
+        const feeRatio = (kpi.totalWin > 0) ? ((totalFee / kpi.totalWin) * 100).toFixed(2) + '%' : '-';
+
+        const label = viewingUser === 'all' ? '全部交易员' : viewingUser;
+
+        // 构建 KPI 卡片
+        let kpiHtml = `
+            <div class="kpi-grid">
+                <div class="kpi-card"><div class="label">当前权益</div><div class="value" style="color:${equity>=totalCapital?'var(--red-loss)':'var(--green-profit)'};">${formatCurrency(equity)}</div></div>
+                <div class="kpi-card"><div class="label">总盈亏金额</div><div class="value" style="color:${totalProfit>=0?'var(--red-loss)':'var(--green-profit)'};">${totalProfit>=0?'+':''}${formatCurrency(totalProfit)}</div></div>
+                <div class="kpi-card"><div class="label">盈亏比例</div><div class="value" style="color:${profitRate>=0?'var(--red-loss)':'var(--green-profit)'};">${profitRate>=0?'+':''}${profitRate.toFixed(2)}%</div></div>
+                <div class="kpi-card"><div class="label">交易胜率</div><div class="value">${winRate.toFixed(1)}%</div></div>
+                <div class="kpi-card"><div class="label">交易盈亏比</div><div class="value">${profitFactor}</div></div>
+                <div class="kpi-card"><div class="label">总手续费</div><div class="value">${formatCurrency(totalFee)}</div></div>
+                <div class="kpi-card"><div class="label">手续费占比</div><div class="value">${feeRatio}</div></div>
+            </div>
+        `;
+
+        // ---- 管理员查看全部时，增加交易员卡片 ----
+        let traderCardsHtml = '';
+        if (currentUser.role === 'admin' && viewingUser === 'all') {
             try {
-                let url = '/stats';
-                if (viewingUser !== 'all') {
-                    url += `?user=${viewingUser}`;
+                const users = await apiRequest('/users');
+                const traders = users.filter(u => u.role === 'trader');
+                if (traders.length > 0) {
+                    // 并行获取每个交易员的统计
+                    const statsPromises = traders.map(u => apiRequest(`/stats?user=${u.username}`));
+                    const statsResults = await Promise.all(statsPromises);
+
+                    let cardsHtml = `<div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:24px;">`;
+                    traders.forEach((u, index) => {
+                        const stat = statsResults[index] || {};
+                        const kpiData = stat.kpi || {};
+                        const traderProfit = kpiData.totalProfit || 0;
+                        const traderCapital = kpiData.totalCapital || 0;
+                        const traderEquity = traderCapital + traderProfit;
+                        const traderRate = traderCapital > 0 ? (traderProfit / traderCapital) * 100 : 0;
+
+                        cardsHtml += `
+                            <div onclick="switchViewUser('${u.username}')" 
+                                 style="cursor:pointer;flex:0 0 calc(20% - 16px);min-width:170px;background:var(--bg-card);padding:14px 12px;border-radius:var(--radius);border:1px solid var(--border-color);transition:var(--transition);">
+                                <div style="font-weight:600;color:var(--gold);font-size:16px;margin-bottom:4px;">${u.username}</div>
+                                <div style="display:flex;justify-content:space-between;margin-top:2px;">
+                                    <span style="color:var(--text-secondary);font-size:13px;">权益</span>
+                                    <span style="font-weight:600;">${formatCurrency(traderEquity)}</span>
+                                </div>
+                                <div style="display:flex;justify-content:space-between;">
+                                    <span style="color:var(--text-secondary);font-size:13px;">盈亏</span>
+                                    <span style="font-weight:600;color:${traderProfit>=0?'var(--red-loss)':'var(--green-profit)'};">${traderProfit>=0?'+':''}${formatCurrency(traderProfit)}</span>
+                                </div>
+                                <div style="display:flex;justify-content:space-between;">
+                                    <span style="color:var(--text-secondary);font-size:13px;">盈亏比例</span>
+                                    <span style="font-weight:600;color:${traderRate>=0?'var(--red-loss)':'var(--green-profit)'};">${traderRate>=0?'+':''}${traderRate.toFixed(2)}%</span>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    cardsHtml += `</div>`;
+                    traderCardsHtml = cardsHtml;
                 }
-                const stats = await apiRequest(url);
-                const kpi = stats.kpi || {};
-                const totalProfit = kpi.totalProfit || 0;
-                const totalFee = kpi.totalFee || 0;
-                const totalTrades = kpi.totalTrades || 0;
-                const winTrades = kpi.winTrades || 0;
-                const winRate = totalTrades > 0 ? (winTrades / totalTrades) * 100 : 0;
-                const totalCapital = kpi.totalCapital || 0;
-                const equity = totalCapital + totalProfit;
-                const profitRate = totalCapital > 0 ? (totalProfit / totalCapital) * 100 : 0;
-                const profitFactor = (totalTrades > 0 && kpi.totalLoss > 0) ? (kpi.totalWin / kpi.totalLoss).toFixed(2) : (kpi.totalWin > 0 ? '∞' : '0');
-                const feeRatio = (kpi.totalWin > 0) ? ((totalFee / kpi.totalWin) * 100).toFixed(2) + '%' : '-';
-
-                const label = viewingUser === 'all' ? '全部交易员' : viewingUser;
-                area.innerHTML = `
-                    <div class="page-title">📊 数据总览 <small>${label}</small></div>
-                    <div class="kpi-grid">
-                        <div class="kpi-card"><div class="label">当前权益</div><div class="value" style="color:${equity>=totalCapital?'var(--red-loss)':'var(--green-profit)'};">${formatCurrency(equity)}</div></div>
-                        <div class="kpi-card"><div class="label">总盈亏金额</div><div class="value" style="color:${totalProfit>=0?'var(--red-loss)':'var(--green-profit)'};">${totalProfit>=0?'+':''}${formatCurrency(totalProfit)}</div></div>
-                        <div class="kpi-card"><div class="label">盈亏比例</div><div class="value" style="color:${profitRate>=0?'var(--red-loss)':'var(--green-profit)'};">${profitRate>=0?'+':''}${profitRate.toFixed(2)}%</div></div>
-                        <div class="kpi-card"><div class="label">交易胜率</div><div class="value">${winRate.toFixed(1)}%</div></div>
-                        <div class="kpi-card"><div class="label">交易盈亏比</div><div class="value">${profitFactor}</div></div>
-                        <div class="kpi-card"><div class="label">总手续费</div><div class="value">${formatCurrency(totalFee)}</div></div>
-                        <div class="kpi-card"><div class="label">手续费占比</div><div class="value">${feeRatio}</div></div>
-                    </div>
-                    <div class="chart-main">
-                        <div class="chart-left"><h4>📆 每月盈亏趋势</h4><canvas id="monthlyChart"></canvas></div>
-                        <div class="chart-right">
-                            <div class="chart-box"><h4>📅 每日盈亏趋势（近30个交易日）</h4><canvas id="dailyChart"></canvas></div>
-                            <div class="chart-box"><h4>📈 每周净值（倍数）</h4><canvas id="weeklyChart"></canvas></div>
-                        </div>
-                    </div>
-                    <div style="margin-top:16px;color:var(--text-secondary);font-size:13px;text-align:center;border-top:1px solid var(--border-color);padding-top:14px;">
-                        知行合一 · ${new Date().toLocaleDateString()}
-                    </div>
-                `;
-
-                setTimeout(() => {
-                    try {
-                        if (typeof Chart === 'undefined') {
-                            ['monthlyChart', 'dailyChart', 'weeklyChart'].forEach(id => {
-                                const canvas = document.getElementById(id);
-                                if (canvas && canvas.parentNode) {
-                                    canvas.parentNode.innerHTML = '<div style="color:var(--text-secondary);padding:20px;text-align:center;">图表库未加载，请刷新页面</div>';
-                                }
-                            });
-                            return;
-                        }
-                        drawCharts({
-                            monthly: stats.monthly || { labels: [], data: [] },
-                            daily: stats.daily || { labels: [], data: [] },
-                            weekly: stats.weekly || { labels: [], data: [] }
-                        });
-                    } catch (e) {
-                        console.error('绘制图表失败:', e);
-                    }
-                }, 200);
             } catch (e) {
-                area.innerHTML = `<div class="empty-msg">加载数据失败：${e.message}</div>`;
+                console.warn('加载交易员卡片失败', e);
+                traderCardsHtml = '';
             }
         }
+
+        // 构建页面主体
+        area.innerHTML = `
+            <div class="page-title">📊 数据总览 <small>${label}</small></div>
+            ${kpiHtml}
+            ${traderCardsHtml}
+            <div class="chart-main">
+                <div class="chart-left"><h4>📆 每月盈亏趋势</h4><canvas id="monthlyChart"></canvas></div>
+                <div class="chart-right">
+                    <div class="chart-box"><h4>📅 每日盈亏趋势（近30个交易日）</h4><canvas id="dailyChart"></canvas></div>
+                    <div class="chart-box"><h4>📈 每周净值（倍数）</h4><canvas id="weeklyChart"></canvas></div>
+                </div>
+            </div>
+            <div style="margin-top:16px;color:var(--text-secondary);font-size:13px;text-align:center;border-top:1px solid var(--border-color);padding-top:14px;">
+                知行合一 · ${new Date().toLocaleDateString()}
+            </div>
+        `;
+
+        // 绘制图表（原有逻辑）
+        setTimeout(() => {
+            try {
+                if (typeof Chart === 'undefined') {
+                    ['monthlyChart', 'dailyChart', 'weeklyChart'].forEach(id => {
+                        const canvas = document.getElementById(id);
+                        if (canvas && canvas.parentNode) {
+                            canvas.parentNode.innerHTML = '<div style="color:var(--text-secondary);padding:20px;text-align:center;">图表库未加载，请刷新页面</div>';
+                        }
+                    });
+                    return;
+                }
+                drawCharts({
+                    monthly: stats.monthly || { labels: [], data: [] },
+                    daily: stats.daily || { labels: [], data: [] },
+                    weekly: stats.weekly || { labels: [], data: [] }
+                });
+            } catch (e) {
+                console.error('绘制图表失败:', e);
+            }
+        }, 200);
+    } catch (e) {
+        area.innerHTML = `<div class="empty-msg">加载数据失败：${e.message}</div>`;
+    }
+}
 
         // ======================================================================
         //  绘制图表函数（盈利红，亏损绿，周净值增强）

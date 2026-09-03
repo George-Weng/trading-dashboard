@@ -841,7 +841,7 @@
             const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
             if (rows.length === 0) { alert('文件为空'); return; }
 
-            // 定义列名映射（支持中英文、简称）
+            // 列名映射（兼容常用变体）
             const mapKey = (obj, keys) => {
                 for (const key of keys) {
                     if (obj.hasOwnProperty(key)) return obj[key];
@@ -851,9 +851,8 @@
 
             const trades = [];
             rows.forEach(row => {
-                // 兼容各种列名
-                const dateStr = mapKey(row, ['日期', 'date', '交易日期']) || '';
-                if (!dateStr) return; // 日期为空则跳过
+                const dateRaw = mapKey(row, ['日期', 'date', '交易日期']) || '';
+                if (!dateRaw) return;
 
                 const symbol = mapKey(row, ['交易品种', '品种', 'symbol', '商品']) || '';
                 const direction = mapKey(row, ['交易方向', '方向', 'direction', '买卖']) || '';
@@ -863,26 +862,42 @@
                 const closePriceRaw = mapKey(row, ['平仓价', '平仓', 'closePrice', 'close_price']);
                 let close_price = (closePriceRaw !== undefined && closePriceRaw !== '') ? parseFloat(closePriceRaw) : null;
 
-                // 数据类型校验
                 if (!symbol || !direction || isNaN(stop_loss) || isNaN(open_price) || isNaN(volume)) {
                     console.warn('跳过无效行：', row);
                     return;
                 }
                 if (close_price !== null && isNaN(close_price)) close_price = null;
 
-                // 日期格式化（如果是数字Excel日期，转换为字符串）
-                let dateStrFormatted = dateStr;
-                if (typeof dateStr === 'number') {
-                    // Excel 日期序列号转日期字符串
-                    const excelEpoch = new Date(1899, 11, 30);
-                    const dateObj = new Date(excelEpoch.getTime() + dateStr * 86400000);
-                    dateStrFormatted = dateObj.toISOString().slice(0, 10);
-                } else if (typeof dateStr === 'string') {
-                    // 尝试解析并格式化
-                    const parsed = new Date(dateStr);
-                    if (!isNaN(parsed)) {
-                        dateStrFormatted = parsed.toISOString().slice(0, 10);
+                // ---------- 日期处理（修复时区偏移） ----------
+                let dateStrFormatted = '';
+                if (typeof dateRaw === 'string') {
+                    // 1. 尝试直接截取 YYYY-MM-DD 部分（支持 "2026-09-03 00:00:00" 或 "2026-09-03"）
+                    const match = dateRaw.match(/^(\d{4}-\d{2}-\d{2})/);
+                    if (match) {
+                        dateStrFormatted = match[1];
+                    } else {
+                        // 2. 否则用 Date 解析并转为本地日期
+                        const parsed = new Date(dateRaw);
+                        if (!isNaN(parsed)) {
+                            const year = parsed.getFullYear();
+                            const month = String(parsed.getMonth() + 1).padStart(2, '0');
+                            const day = String(parsed.getDate()).padStart(2, '0');
+                            dateStrFormatted = `${year}-${month}-${day}`;
+                        }
                     }
+                } else if (typeof dateRaw === 'number') {
+                    // 3. Excel 日期数字
+                    const excelEpoch = new Date(1899, 11, 30);
+                    const dateObj = new Date(excelEpoch.getTime() + dateRaw * 86400000);
+                    const year = dateObj.getFullYear();
+                    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                    const day = String(dateObj.getDate()).padStart(2, '0');
+                    dateStrFormatted = `${year}-${month}-${day}`;
+                }
+
+                if (!dateStrFormatted) {
+                    console.warn('日期解析失败：', dateRaw);
+                    return;
                 }
 
                 trades.push({

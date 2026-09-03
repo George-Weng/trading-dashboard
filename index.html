@@ -828,43 +828,90 @@
         }
 
         async function importTradesFile(username) {
-            const fileInput = document.getElementById('importFileInput');
-            if (!fileInput.files || fileInput.files.length === 0) { alert('请选择文件'); return; }
-            const file = fileInput.files[0];
-            const reader = new FileReader();
-            reader.onload = async function(e) {
-                try {
-                    const data = new Uint8Array(e.target.result);
-                    const workbook = XLSX.read(data, { type: 'array' });
-                    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-                    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-                    if (rows.length === 0) { alert('文件为空'); return; }
-                    const trades = [];
-                    rows.forEach(row => {
-                        const dateStr = row['日期'] || row['date'] || '';
-                        if (!dateStr) return;
-                        const symbol = row['交易品种'] || row['symbol'] || '';
-                        const direction = row['交易方向'] || row['direction'] || '';
-                        const stop_loss = parseFloat(row['止损位'] || row['stopLoss'] || 0);
-                        const open_price = parseFloat(row['开仓价'] || row['openPrice'] || 0);
-                        const volume = parseFloat(row['开仓手数'] || row['volume'] || 0);
-                        let close_price_raw = row['平仓价'] || row['closePrice'];
-                        let close_price = (close_price_raw !== undefined && close_price_raw !== '') ? parseFloat(close_price_raw) : null;
-                        if (!symbol || !direction || isNaN(stop_loss) || isNaN(open_price) || isNaN(volume)) return;
-                        if (close_price !== null && isNaN(close_price)) close_price = null;
-                        trades.push({ username, date: dateStr, symbol, direction, stop_loss, open_price, volume, close_price });
-                    });
-                    if (trades.length === 0) { alert('没有有效数据可导入'); return; }
-                    const result = await apiRequest('/trades/batch', { method: 'POST', body: JSON.stringify(trades) });
-                    alert(`成功导入 ${result.inserted} 条记录`);
-                    closeModal();
-                    renderPage(currentPage);
-                } catch (err) {
-                    alert('导入失败：' + err.message);
+    const fileInput = document.getElementById('importFileInput');
+    if (!fileInput.files || fileInput.files.length === 0) { alert('请选择文件'); return; }
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+            if (rows.length === 0) { alert('文件为空'); return; }
+
+            // 定义列名映射（支持中英文、简称）
+            const mapKey = (obj, keys) => {
+                for (const key of keys) {
+                    if (obj.hasOwnProperty(key)) return obj[key];
                 }
+                return undefined;
             };
-            reader.readAsArrayBuffer(file);
+
+            const trades = [];
+            rows.forEach(row => {
+                // 兼容各种列名
+                const dateStr = mapKey(row, ['日期', 'date', '交易日期']) || '';
+                if (!dateStr) return; // 日期为空则跳过
+
+                const symbol = mapKey(row, ['交易品种', '品种', 'symbol', '商品']) || '';
+                const direction = mapKey(row, ['交易方向', '方向', 'direction', '买卖']) || '';
+                const stop_loss = parseFloat(mapKey(row, ['止损位', '止损', 'stopLoss', 'stop_loss']) || 0);
+                const open_price = parseFloat(mapKey(row, ['开仓价', '开仓', 'openPrice', 'open_price']) || 0);
+                const volume = parseFloat(mapKey(row, ['开仓手数', '手数', 'volume', '数量']) || 0);
+                const closePriceRaw = mapKey(row, ['平仓价', '平仓', 'closePrice', 'close_price']);
+                let close_price = (closePriceRaw !== undefined && closePriceRaw !== '') ? parseFloat(closePriceRaw) : null;
+
+                // 数据类型校验
+                if (!symbol || !direction || isNaN(stop_loss) || isNaN(open_price) || isNaN(volume)) {
+                    console.warn('跳过无效行：', row);
+                    return;
+                }
+                if (close_price !== null && isNaN(close_price)) close_price = null;
+
+                // 日期格式化（如果是数字Excel日期，转换为字符串）
+                let dateStrFormatted = dateStr;
+                if (typeof dateStr === 'number') {
+                    // Excel 日期序列号转日期字符串
+                    const excelEpoch = new Date(1899, 11, 30);
+                    const dateObj = new Date(excelEpoch.getTime() + dateStr * 86400000);
+                    dateStrFormatted = dateObj.toISOString().slice(0, 10);
+                } else if (typeof dateStr === 'string') {
+                    // 尝试解析并格式化
+                    const parsed = new Date(dateStr);
+                    if (!isNaN(parsed)) {
+                        dateStrFormatted = parsed.toISOString().slice(0, 10);
+                    }
+                }
+
+                trades.push({
+                    username,
+                    date: dateStrFormatted,
+                    symbol,
+                    direction,
+                    stop_loss,
+                    open_price,
+                    volume,
+                    close_price
+                });
+            });
+
+            if (trades.length === 0) {
+                alert('没有有效数据可导入，请检查列名是否包含：日期、品种、方向、止损、开仓价、手数、平仓价');
+                return;
+            }
+
+            const result = await apiRequest('/trades/batch', { method: 'POST', body: JSON.stringify(trades) });
+            alert(`成功导入 ${result.inserted} 条记录`);
+            closeModal();
+            renderPage(currentPage);
+        } catch (err) {
+            alert('导入失败：' + err.message);
+            console.error(err);
         }
+    };
+    reader.readAsArrayBuffer(file);
+}
 
         // ---- 清空 ----
         async function clearUserTrades(username) {

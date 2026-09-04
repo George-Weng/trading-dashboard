@@ -11,7 +11,7 @@ export async function verifyJWT(token, secret) {
     }
 }
 
-// 公共计算函数（含止盈位计算）
+// 公共计算函数（含止盈位计算，已按新公式修正）
 export async function calculateTrade(db, tradeData) {
     const config = await db.prepare('SELECT * FROM symbols WHERE symbol = ?').bind(tradeData.symbol).first();
     if (!config) {
@@ -34,9 +34,11 @@ export async function calculateTrade(db, tradeData) {
     const direction = tradeData.direction;
     const stopLoss = tradeData.stop_loss;
 
+    // 手续费
     const openFee = openPrice * volume * open_fee_rate;
     const closeFee = closePrice ? closePrice * volume * close_fee_rate : 0;
 
+    // 盈亏计算（仅平仓时）
     let profitPoints = null;
     let profit = null;
     if (closePrice !== null && closePrice !== undefined) {
@@ -48,15 +50,18 @@ export async function calculateTrade(db, tradeData) {
         profit = profitPoints * point_value * volume - openFee - closeFee;
     }
 
-    // 1:1 和 1:2 止盈价位
+    // 止盈价位（按新公式）
     let tp1 = null, tp2 = null;
     if (stopLoss !== null && stopLoss !== undefined) {
-        const baseDiff = openPrice - stopLoss;
-        const adjust = direction === '买入' ? -tick_size : tick_size;
-        const diff1 = baseDiff + adjust;
+        const tick = tick_size;
+        // 根据方向调整符号
+        const adjust = direction === '买入' ? tick : -tick;
+        // diff1 = (开仓价 - 止损) + adjust
+        const diff1 = openPrice - stopLoss + adjust;
         const diff2 = diff1 * 2;
-        tp1 = openPrice + diff1;
-        tp2 = openPrice + diff2;
+        // 最终止盈价位 = 开仓价 + diff，并取绝对值
+        tp1 = Math.abs(openPrice + diff1);
+        tp2 = Math.abs(openPrice + diff2);
     }
 
     return {

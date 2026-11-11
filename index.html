@@ -399,26 +399,28 @@
         const totalCapital = kpi.totalCapital || 0;
         const equity = totalCapital + totalProfit;
         const profitRate = totalCapital > 0 ? (totalProfit / totalCapital) * 100 : 0;
-        const profitFactor = (totalTrades > 0 && kpi.totalLoss > 0) ? (kpi.totalWin / kpi.totalLoss).toFixed(2) : (kpi.totalWin > 0 ? '∞' : '0');
+
+        // ===== 平均盈亏比：平均每笔盈利 ÷ 平均每笔亏损 =====
+        const winTradesCount = kpi.winTrades || 0;
+        const lossTradesCount = kpi.lossTrades || 0;
+        const avgWin = winTradesCount > 0 ? (kpi.totalWin || 0) / winTradesCount : 0;
+        const avgLoss = lossTradesCount > 0 ? (kpi.totalLoss || 0) / lossTradesCount : 0;
+        const profitFactor = avgLoss > 0
+            ? (avgWin / avgLoss).toFixed(2)
+            : (avgWin > 0 ? '∞' : '0');
+        // =================================================
+
         const feeRatio = (kpi.totalWin > 0) ? ((totalFee / kpi.totalWin) * 100).toFixed(2) + '%' : '-';
 
         const label = viewingUser === 'all' ? '全部交易员' : viewingUser;
 
-        // ---- 标题区域（增加返回按钮） ----
-        let titleHtml = `<div class="page-title">📊 数据总览 <small>${label}</small>`;
-        if (currentUser.role === 'admin' && viewingUser !== 'all') {
-            titleHtml += ` <button class="btn" style="padding:4px 16px;font-size:13px;margin-left:12px;background:var(--gold);color:#0b0e14;border:none;border-radius:4px;cursor:pointer;" onclick="switchViewUser('all')">← 返回全部</button>`;
-        }
-        titleHtml += `</div>`;
-
-        // 构建 KPI 卡片
         let kpiHtml = `
             <div class="kpi-grid">
                 <div class="kpi-card"><div class="label">当前权益</div><div class="value" style="color:${equity>=totalCapital?'var(--red-loss)':'var(--green-profit)'};">${formatCurrency(equity)}</div></div>
                 <div class="kpi-card"><div class="label">总盈亏金额</div><div class="value" style="color:${totalProfit>=0?'var(--red-loss)':'var(--green-profit)'};">${totalProfit>=0?'+':''}${formatCurrency(totalProfit)}</div></div>
                 <div class="kpi-card"><div class="label">盈亏比例</div><div class="value" style="color:${profitRate>=0?'var(--red-loss)':'var(--green-profit)'};">${profitRate>=0?'+':''}${profitRate.toFixed(2)}%</div></div>
                 <div class="kpi-card"><div class="label">交易胜率</div><div class="value">${winRate.toFixed(1)}%</div></div>
-                <div class="kpi-card"><div class="label">交易盈亏比</div><div class="value">${profitFactor}</div></div>
+                <div class="kpi-card"><div class="label">平均盈亏比</div><div class="value">${profitFactor}</div></div>
                 <div class="kpi-card"><div class="label">总手续费</div><div class="value">${formatCurrency(totalFee)}</div></div>
                 <div class="kpi-card"><div class="label">手续费占比</div><div class="value">${feeRatio}</div></div>
             </div>
@@ -471,9 +473,20 @@
             }
         }
 
-        // 构建页面主体
+        // ---- 非“全部”查看时，增加返回管理员主页按钮 ----
+        let backButtonHtml = '';
+        if (currentUser.role === 'admin' && viewingUser !== 'all') {
+            backButtonHtml = `
+                <div style="margin-bottom:16px;">
+                    <button class="btn" style="background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border-color);padding:6px 16px;border-radius:6px;font-size:13px;"
+                            onclick="switchViewUser('all')">← 返回管理员主页</button>
+                </div>
+            `;
+        }
+
         area.innerHTML = `
-            ${titleHtml}
+            <div class="page-title">📊 数据总览 <small>${label}</small></div>
+            ${backButtonHtml}
             ${kpiHtml}
             ${traderCardsHtml}
             <div class="chart-main">
@@ -488,7 +501,6 @@
             </div>
         `;
 
-        // 绘制图表（原有逻辑）
         setTimeout(() => {
             try {
                 if (typeof Chart === 'undefined') {
